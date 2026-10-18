@@ -1,0 +1,198 @@
+name: Build Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build-windows:
+    name: Windows installer (.exe + WebView2, with CP-SAT)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install LLVM (clang-cl) and NSIS
+        run: choco install llvm nsis -y
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+      - name: Build OR-Tools Windows C++ binding
+        shell: bash
+        run: bash scripts/build_ortools_windows.sh
+      - name: Build Windows amd64 with -tags ortools
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          CC: "gcc"
+          MSYS_NO_PATHCONV: "1"
+        run: |
+          export PATH="/c/mingw64/bin:$PATH:$(go env GOPATH)/bin"
+          wails build -platform windows/amd64 -tags ortools
+          cp third_party/ortools_win/ortools_csat.dll build/bin/
+          [ -f third_party/ortools_win/bin/ortools.dll ] && cp third_party/ortools_win/bin/ortools.dll build/bin/ || echo "no separate ortools.dll (statically linked)"
+          CRT=$(find "/c/Program Files/Microsoft Visual Studio" -type d -name "Microsoft.VC143.CRT" 2>/dev/null | head -1)
+          if [ -n "$CRT" ]; then
+            find "$CRT" -maxdepth 1 -name '*.dll' -exec cp {} build/bin/ ';' && echo "copied MSVC CRT from $CRT" || echo "CRT copy skipped"
+          fi
+      - name: Stage installer files
+        shell: bash
+        run: |
+          mkdir -p windows/staging
+          cp build/bin/timetable.exe windows/staging/timetable.exe
+          cp third_party/ortools_win/ortools_csat.dll windows/staging/ortools_csat.dll
+          [ -f build/bin/ortools.dll ] && cp build/bin/ortools.dll windows/staging/ortools.dll
+          for d in vcruntime140.dll vcruntime140_1.dll msvcp140.dll msvcp140_1.dll msvcp140_codecvt_ids.dll; do
+            [ -f "build/bin/$d" ] && cp "build/bin/$d" windows/staging/
+          done
+          curl -L "https://go.microsoft.com/fwlink/?linkid=2124701" -o windows/staging/MicrosoftEdgeWebView2RuntimeInstallerX64.exe
+      - name: Build NSIS installer
+        shell: bash
+        run: |
+          export PATH="/c/Program Files (x86)/NSIS:$PATH"
+          makensis -DREPOROOT="${{ github.workspace }}" windows/installer.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timetable-windows-setup
+          path: build/timetable-setup-x64.exe
+
+  build-linux:
+    name: Linux (AppImage)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install WebView build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev pkg-config build-essential wget dpkg-dev libglib2.0-bin file patchelf binutils python3
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+      - name: Build OR-Tools C++ binding
+        run: bash scripts/build_ortools.sh
+      - name: Build Linux amd64 with -tags ortools
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ortools/lib
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          wails build -platform linux/amd64 -tags "ortools webkit2_41"
+          cp -L third_party/ortools/lib/libortools.so* build/bin/
+          export LD_LIBRARY_PATH="build/bin:${LD_LIBRARY_PATH:-}"
+          echo "== webkit soname linked =="
+          ldd build/bin/timetable | grep -i webkit
+          ldd build/bin/timetable | grep -qi 'webkit2gtk-4.1' || { echo "ERROR: binary not linked against webkit2gtk-4.1 (Fedora 40+ requires 4.1)"; exit 1; }
+      - name: Build AppImage (bundle only app + libortools; use system WebKit/GTK/Mesa)
+        run: |
+          APP=build/AppDir
+          rm -rf "$APP"
+          mkdir -p "$APP/usr/bin" "$APP/usr/lib" \
+                   "$APP/usr/share/applications" "$APP/usr/share/icons/hicolor/512x512/apps"
+          cp build/bin/timetable "$APP/usr/bin/timetable"
+          cp -L build/bin/libortools.so* "$APP/usr/lib/"
+          cp scripts/timetable.desktop "$APP/usr/share/applications/timetable.desktop"
+          cp scripts/timetable.desktop "$APP/timetable.desktop"
+          cp scripts/appicon.png "$APP/usr/share/icons/hicolor/512x512/apps/timetable.png"
+          cp scripts/appicon.png "$APP/timetable.png"
+          # appimagetool is vendored (extracted) under tools/ so the build needs no network
+          # access and no FUSE/AppImage runtime on the runner.
+          chmod +x "$PWD/tools/appimagetool/AppRun" 2>/dev/null || true
+          cat > "$APP/AppRun" <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export APPDIR="$HERE"
+          # Only our own libortools is bundled; the desktop stack (GTK3, WebKit2GTK-4.1, Mesa,
+          # Wayland) is taken from the HOST. That is exactly what native Fedora apps do, so WebKit's
+          # EGL/GBM display initializes correctly against the host's XWayland/Wayland and the
+          # "Could not create default EGL display: EGL_BAD_PARAMETER" white screen does not occur.
+          export LD_LIBRARY_PATH="$HERE/usr/lib:$LD_LIBRARY_PATH"
+          # Safety net for a known WebKitGTK DMABUF white-screen quirk on some hosts.
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1
+          # Let GDK auto-detect the session (Wayland on modern GNOME, X11 otherwise). Do NOT force a backend.
+          if ! (ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4\.1\.so\.0') \
+             && [ ! -e /usr/lib64/libwebkit2gtk-4.1.so.0 ] \
+             && [ ! -e /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0 ]; then
+            echo "ERROR: libwebkit2gtk-4.1 not found on this system."
+            echo "Install it, e.g.:"
+            echo "  Fedora:  sudo dnf install webkit2gtk4.1"
+            echo "  Ubuntu:  sudo apt install libwebkit2gtk-4.1-0"
+            exit 1
+          fi
+          exec "$HERE/usr/bin/timetable" "$@"
+          EOF
+          chmod +x "$APP/AppRun" "$APP/usr/bin/timetable"
+          "$PWD/tools/appimagetool/AppRun" "$APP" build/timetable-x86_64.AppImage
+          ls -lh build/timetable-x86_64.AppImage
+      - name: Verify AppImage on Fedora 40 (coherence check; real render validated by user)
+        run: |
+          AI="$PWD/build/timetable-x86_64.AppImage"
+          chmod +x "$AI"
+          mkdir -p "$PWD/ci-debug"
+          # The AppImage uses the SYSTEM WebKit2GTK 4.1 + GTK3 + Mesa, so the verify env must have them
+          # installed. We can only do a headless coherence check here: xvfb has no DRI3, so WebKit's EGL
+          # display cannot be created under xvfb (a benign EGL error that does NOT occur on a real desktop).
+          docker run --rm -v "$AI":/app.AppImage:Z -v "$PWD/ci-debug":/dbg:Z fedora:40 bash -c '
+            dnf install -y -q --setopt=install_weak_deps=False --setopt=tsflags=nodocs webkit2gtk4.1 gtk3 xorg-x11-server-Xvfb 2>&1 | tail -3
+            /app.AppImage --appimage-extract >/dev/null 2>&1
+            echo "== unresolved libs in the bundle (must be empty / NONE) =="
+            ldd squashfs-root/usr/bin/timetable 2>/dev/null | grep -i "not found" || echo "NONE"
+            echo "== attempt launch under xvfb (EGL error here is expected & non-fatal) =="
+            xvfb-run -a /app.AppImage --appimage-extract-and-run >/tmp/app.log 2>&1 &
+            PID=$!
+            sleep 12
+            cp /tmp/app.log /dbg/app.log
+            echo "== launch log tail =="
+            tail -5 /tmp/app.log
+            kill $PID 2>/dev/null || true
+            wait $PID 2>/dev/null || true
+            echo "verify-done"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timetable-linux
+          path: build/timetable-x86_64.AppImage
+      - name: Publish verify debug log
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LOG=ci-debug/app.log
+          if [ -f "$LOG" ]; then
+            BODY=$(tail -c 8000 "$LOG" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+          else
+            BODY="NO LOG CAPTURED"
+          fi
+          curl -s -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/4codegit/timetable/issues \
+            -d "{\"title\":\"CI verify debug ${{ github.ref_name }}\",\"body\":$BODY}" || echo "issue-create-failed"
+
+  release:
+    name: GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: List artifacts
+        run: ls -R artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/timetable-windows-setup/*
+            artifacts/timetable-linux/*

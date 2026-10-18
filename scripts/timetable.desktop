@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Timetable
+Comment=Конструктор школьного расписания
+Exec=timetable
+Icon=timetable
+Type=Application
+Categories=Education;Office;

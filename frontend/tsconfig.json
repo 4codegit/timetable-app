@@ -1,0 +1,30 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    /**
+     * The UI is intentionally written in JavaScript and receives dynamic
+     * Wails bridge values. Svelte/Vite still validates component syntax and
+     * templates; disabling TypeScript's JS inference avoids false-positive
+     * implicit-any diagnostics for this runtime data.
+     */
+    "allowJs": true,
+    "checkJs": false,
+    "isolatedModules": true
+  },
+  "include": [
+    "src/**/*.d.ts",
+    "src/**/*.ts",
+    "src/**/*.js",
+    "src/**/*.svelte"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+name: windows-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_release:
+        description: "Прикрепить пакет к релизу тега"
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+
+      # OR-Tools 9.11 (VS2022) + наш биндинг в ortools_csat.dll (clang-cl)
+      - name: Build OR-Tools binding DLL
+        run: bash scripts/build_ortools_windows.sh
+
+      - name: Build exe (browser mode + OR-Tools)
+        run: |
+          go build -tags "browser ortools" -o timetable.exe .
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path pkg/frontend | Out-Null
+          Copy-Item timetable.exe pkg/
+          Copy-Item third_party/ortools_win/ortools_csat.dll pkg/ -ErrorAction SilentlyContinue
+          Copy-Item third_party/ortools_win/bin/*.dll pkg/ -ErrorAction SilentlyContinue
+          Copy-Item third_party/ortools_win/lib/*.dll pkg/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse frontend/dist pkg/frontend
+          $readme = @"
+          Timetable $env:GITHUB_REF_NAME — Windows (браузерный режим)
+
+          Запуск: timetable.exe  ->  открыть http://127.0.0.1:8777
+          База данных (timetable.db) создаётся рядом с exe.
+          Все DLL держите рядом с exe (в архиве уже так).
+          "@
+          Set-Content -Path pkg/README.txt -Value $readme -Encoding UTF8
+          Compress-Archive -Path pkg/* -DestinationPath timetable-win64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: timetable-win64
+          path: timetable-win64.zip
+
+      - name: Attach to release
+        if: ${{ inputs.upload_release == true || startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" timetable-win64.zip --clobber || \
+            gh release create "${GITHUB_REF_NAME}" timetable-win64.zip --title "Timetable ${GITHUB_REF_NAME}" --notes "Windows build with OR-Tools CP-SAT"
