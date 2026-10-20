@@ -355,11 +355,52 @@ func TestExportImportRoundTripPreservesSchedule(t *testing.T) {
 	}
 }
 
-// TestSwapEntriesIntegration drives the App-layer SwapEntries exactly the way
-// the frontend does after a drag-and-drop: src is at (srcDay, srcSlot), target
-// is at (dstDay, dstSlot). After the call the two entries must have exchanged
-// their coordinates. This is a regression test for the silent-no-op swap bug
-// that went unnoticed because the unit test was missing.
+// TestUpdateClassPreservesSubgroup verifies that editing a class keeps its
+// subgroup_of link — without it a split class (10А → subgroups) loses the
+// parent/child relationship and English (or any split subject) stops appearing
+// in the parent's timetable cells.
+func TestUpdateClassPreservesSubgroup(t *testing.T) {
+	a := newTestApp(t)
+	sc, err := a.CreateSchool("Тест подгруппы")
+	if err != nil {
+		t.Fatalf("CreateSchool: %v", err)
+	}
+	id := sc.ID
+	parent, err := a.CreateClass(domain.SchoolClass{SchoolID: id, Name: "10А"})
+	if err != nil {
+		t.Fatalf("CreateClass parent: %v", err)
+	}
+	child, err := a.CreateClass(domain.SchoolClass{SchoolID: id, Name: "10А-гр1", SubgroupOf: &parent.ID})
+	if err != nil {
+		t.Fatalf("CreateClass child: %v", err)
+	}
+	// Rename the child class (editing an existing class) — subgroup_of must survive.
+	child.Name = "10А-гр1-переименовано"
+	if err := a.UpdateClass(*child); err != nil {
+		t.Fatalf("UpdateClass: %v", err)
+	}
+	classes, err := a.ListClasses(id)
+	if err != nil {
+		t.Fatalf("ListClasses: %v", err)
+	}
+	var got *domain.SchoolClass
+	for i := range classes {
+		if classes[i].ID == child.ID {
+			got = &classes[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("edited class %d not found", child.ID)
+	}
+	if got.SubgroupOf == nil || *got.SubgroupOf != parent.ID {
+		t.Fatalf("subgroup_of lost after UpdateClass: got %+v", got)
+	}
+	if got.Name != "10А-гр1-переименовано" {
+		t.Fatalf("name not updated: %q", got.Name)
+	}
+}
+
 func TestSwapEntriesIntegration(t *testing.T) {
 	a := newTestApp(t)
 	sc, err := a.CreateSchool("Swap Integration")

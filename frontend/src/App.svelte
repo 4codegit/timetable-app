@@ -60,7 +60,7 @@
         async function saveEdit(kind, x) {
                 if (kind === "teacher") await UpdateTeacher({ id: x.id, school_id: x.school_id, name: x.name, short_name: x.short_name, max_hours_per_week: x.max_hours_per_week || 0 });
                 else if (kind === "subject") await UpdateSubject({ id: x.id, school_id: x.school_id, name: x.name, short_name: x.short_name, requires_room_type: x.requires_room_type || "any" });
-                else if (kind === "class") await UpdateClass({ id: x.id, school_id: x.school_id, name: x.name, room_id: x.room_id || 0 });
+	                else if (kind === "class") await UpdateClass({ id: x.id, school_id: x.school_id, name: x.name, room_id: x.room_id || 0, subgroup_of: x.subgroup_of ?? null });
                 else if (kind === "room") await UpdateRoom({ id: x.id, school_id: x.school_id, name: x.name, room_type: x.room_type || "any" });
                 editing = null;
                 await reloadRefs();

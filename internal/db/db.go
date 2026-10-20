@@ -521,8 +521,8 @@ func nullableID(id int) interface{} {
 }
 
 func (s *Store) UpdateClass(c domain.SchoolClass) error {
-	_, err := s.db.Exec(`UPDATE classes SET name=?, room_id=? WHERE id=?`,
-		c.Name, nullableID(c.RoomID), c.ID)
+	_, err := s.db.Exec(`UPDATE classes SET name=?, room_id=?, subgroup_of=? WHERE id=?`,
+		c.Name, nullableID(c.RoomID), c.SubgroupOf, c.ID)
 	return err
 }
 
