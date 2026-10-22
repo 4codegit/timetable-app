@@ -32,7 +32,7 @@ func TestDividedHoursPairing(t *testing.T) {
 	}
 	in := SolveInput{SchoolID: 2, Lessons: lessons, Teachers: teachers, Classes: classes,
 		Rooms: rooms, Subjects: subjects, Config: domain.SchedulingConfig{DaysPerWeek: 6, SlotsPerDay: 8}}
-	res := Solve(context.Background(), in, 4, 10*time.Second)
+	res := Solve(context.Background(), in, 4, 10*time.Second, nil)
 	if res.Placed != res.Total {
 		t.Fatalf("divided 2-hour lessons not fully placed: %d/%d", res.Placed, res.Total)
 	}

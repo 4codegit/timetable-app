@@ -37,7 +37,7 @@ func TestSolveNoConflicts(t *testing.T) {
 		SchoolID: 1, Lessons: lessons, Teachers: teachers, Classes: classes,
 		Rooms: rooms, Subjects: subjects, Constraints: nil, Config: cfg,
 	}
-	res := Solve(context.Background(), in, 4, 20*time.Second)
+	res := Solve(context.Background(), in, 4, 20*time.Second, nil)
 	if res.Placed != res.Total {
 		t.Fatalf("not all lessons placed: %d/%d", res.Placed, res.Total)
 	}
@@ -84,7 +84,7 @@ func TestSolvePreciseFallback(t *testing.T) {
 		SchoolID: 1, Lessons: lessons, Teachers: teachers, Classes: classes,
 		Rooms: rooms, Subjects: subjects, Config: domain.SchedulingConfig{DaysPerWeek: 6, SlotsPerDay: 8},
 	}
-	res := SolvePrecise(context.Background(), in, 2, 20*time.Second)
+	res := SolvePrecise(context.Background(), in, 2, 20*time.Second, nil)
 	if res.Placed != res.Total {
 		t.Fatalf("SolvePrecise fallback placed %d/%d", res.Placed, res.Total)
 	}
@@ -110,7 +110,7 @@ func TestSolveDaysMask(t *testing.T) {
 		Rooms: rooms, Subjects: subjects,
 		Config: domain.SchedulingConfig{DaysPerWeek: 6, SlotsPerDay: 8, DaysMask: 0b111011},
 	}
-	res := Solve(context.Background(), in, 4, 20*time.Second)
+	res := Solve(context.Background(), in, 4, 20*time.Second, nil)
 	if res.Placed != res.Total {
 		t.Fatalf("not all lessons placed: %d/%d", res.Placed, res.Total)
 	}
@@ -188,7 +188,7 @@ func TestSubgroupsParallel(t *testing.T) {
 			{Type: "teacher_unavailable", EntityType: "teacher", EntityID: 2, DayOfWeek: intPtr(1), TimeslotStart: intPtr(0), TimeslotEnd: intPtr(3), IsHard: true},
 		},
 	}
-	res := Solve(context.Background(), in, 2, 15*time.Second)
+	res := Solve(context.Background(), in, 2, 15*time.Second, nil)
 	if res.Placed != 3 {
 		t.Fatalf("placed %d/%d", res.Placed, res.Total)
 	}
@@ -254,7 +254,7 @@ func TestSolveLargeSchool(t *testing.T) {
 		t.Skip("long-running test")
 	}
 	in := synthSchool(20)
-	res := Solve(context.Background(), in, 4, 10*time.Second)
+	res := Solve(context.Background(), in, 4, 10*time.Second, nil)
 	if res.Total == 0 {
 		t.Fatal("no occurrences built")
 	}
@@ -267,7 +267,7 @@ func BenchmarkSolve20Classes(b *testing.B) {
 	in := synthSchool(20)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Solve(context.Background(), in, 4, 5*time.Second)
+		Solve(context.Background(), in, 4, 5*time.Second, nil)
 	}
 }
 
@@ -275,7 +275,7 @@ func BenchmarkSolve10Classes(b *testing.B) {
 	in := synthSchool(10)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Solve(context.Background(), in, 4, 2*time.Second)
+		Solve(context.Background(), in, 4, 2*time.Second, nil)
 	}
 }
 
@@ -316,7 +316,7 @@ func TestSolveImpossibleLessonSkippedNotZeroed(t *testing.T) {
 		Constraints: []domain.Constraint{bannedAllWeek},
 		Config:      domain.SchedulingConfig{DaysPerWeek: 6, SlotsPerDay: 8},
 	}
-	res := Solve(context.Background(), in, 2, 10*time.Second)
+	res := Solve(context.Background(), in, 2, 10*time.Second, nil)
 	if res.Total != 12 {
 		t.Fatalf("total = %d, want 12", res.Total)
 	}
@@ -366,7 +366,7 @@ func TestSolveDividedFamilySkippedWhenImpossible(t *testing.T) {
 		Constraints: []domain.Constraint{bannedAllWeek},
 		Config:      domain.SchedulingConfig{DaysPerWeek: 6, SlotsPerDay: 8},
 	}
-	res := Solve(context.Background(), in, 2, 10*time.Second)
+	res := Solve(context.Background(), in, 2, 10*time.Second, nil)
 	if res.Total != 3 {
 		t.Fatalf("total = %d, want 3", res.Total)
 	}
@@ -390,7 +390,7 @@ func TestSolveNoRoomsPlacesNothing(t *testing.T) {
 		Rooms: nil, Subjects: subjects,
 		Config: domain.SchedulingConfig{DaysPerWeek: 6, SlotsPerDay: 8},
 	}
-	res := Solve(context.Background(), in, 2, 5*time.Second)
+	res := Solve(context.Background(), in, 2, 5*time.Second, nil)
 	if res.Total != 2 {
 		t.Fatalf("total = %d, want 2", res.Total)
 	}

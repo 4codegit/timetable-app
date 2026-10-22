@@ -84,7 +84,9 @@ func prepareDaysMask(in SolveInput) (SolveInput, int) {
 }
 
 // Solve runs parallel randomised-restart CSP search.
-func Solve(ctx context.Context, in SolveInput, parallelism int, timeout time.Duration) Result {
+// onProgress, if non-nil, is called with the best placed count each time it
+// improves — so a long-running solve can show a live progress bar.
+func Solve(ctx context.Context, in SolveInput, parallelism int, timeout time.Duration, onProgress func(placed int)) Result {
 	if parallelism < 1 {
 		parallelism = 1
 	}
@@ -112,6 +114,9 @@ func Solve(ctx context.Context, in SolveInput, parallelism int, timeout time.Dur
 		defer mu.Unlock()
 		if r.Placed > best.Placed || (r.Placed == best.Placed && r.Violations < best.Violations) {
 			best = r
+			if onProgress != nil {
+				onProgress(best.Placed)
+			}
 		}
 	}
 
@@ -1180,7 +1185,9 @@ func HasPreciseSolver() bool {
 
 // SolvePrecise prefers the OR-Tools CP-SAT solver when compiled in; otherwise falls back to the
 // pure-Go backtracking solver so the default build always works.
-func SolvePrecise(ctx context.Context, in SolveInput, parallelism int, timeout time.Duration) Result {
+// onProgress is forwarded to the pure-Go fallback (OR-Tools C++ solver is
+// blocking and cannot report intermediate progress).
+func SolvePrecise(ctx context.Context, in SolveInput, parallelism int, timeout time.Duration, onProgress func(placed int)) Result {
 	start := time.Now()
 	if preciseSolver != nil {
 		r, ok := preciseSolver(in, parallelism, timeout)
@@ -1190,7 +1197,7 @@ func SolvePrecise(ctx context.Context, in SolveInput, parallelism int, timeout t
 		}
 		// Школа перегружена или модель тяжёлая: эвристика может
 		// разместить больше — считаем её и берём лучший результат.
-		h := Solve(ctx, in, parallelism, timeout)
+		h := Solve(ctx, in, parallelism, timeout, onProgress)
 		totalMs := time.Since(start).Milliseconds()
 		if h.Placed > r.Placed || !ok {
 			h.ElapsedMs = totalMs
@@ -1199,5 +1206,5 @@ func SolvePrecise(ctx context.Context, in SolveInput, parallelism int, timeout t
 		r.ElapsedMs = totalMs
 		return r
 	}
-	return Solve(ctx, in, parallelism, timeout)
+	return Solve(ctx, in, parallelism, timeout, onProgress)
 }

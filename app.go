@@ -307,7 +307,7 @@ func (a *App) Generate(schoolID, days, slots, daysMask int) (*solver.Result, err
 	if err != nil {
 		return nil, err
 	}
-	res := solver.Solve(a.ctx, in, runtime.NumCPU(), 30*time.Second)
+	res := solver.Solve(a.ctx, in, runtime.NumCPU(), 30*time.Second, nil)
 
 	err = a.store.ReplaceSchedule(schoolID, res.Entries)
 	if err != nil {
@@ -355,21 +355,29 @@ func (a *App) StartPreciseGeneration(schoolID, days, slots, daysMask, solveTimeo
 		genState.set(id, 0, 0, "error", err.Error())
 		return id
 	}
-	timeout := time.Duration(solveTimeoutSec) * time.Second
-	if timeout <= 0 {
-		timeout = 0 // без лимита — solver работает до завершения
-	}
-	id := genState.newID()
-	genState.set(id, 0, 0, "running", "")
-
-	go func() {
-		res := solver.SolvePrecise(a.ctx, in, runtime.NumCPU(), timeout)
-		if err := a.store.ReplaceSchedule(schoolID, res.Entries); err != nil {
-			genState.set(id, res.Placed, res.Total, "error", err.Error())
-			return
+		timeout := time.Duration(solveTimeoutSec) * time.Second
+		if timeout <= 0 {
+			timeout = 0 // без лимита — solver работает до завершения
 		}
-		genState.set(id, res.Placed, res.Total, "done", "")
-	}()
+		id := genState.newID()
+		total := 0
+		for _, l := range in.Lessons {
+			if h := l.HoursPerWeek; h > 0 {
+				total += h
+			}
+		}
+		genState.set(id, 0, total, "running", "")
+
+		go func() {
+			res := solver.SolvePrecise(a.ctx, in, runtime.NumCPU(), timeout, func(placed int) {
+				genState.set(id, placed, total, "running", "")
+			})
+			if err := a.store.ReplaceSchedule(schoolID, res.Entries); err != nil {
+				genState.set(id, res.Placed, res.Total, "error", err.Error())
+				return
+			}
+			genState.set(id, res.Placed, res.Total, "done", "")
+		}()
 
 	return id
 }
