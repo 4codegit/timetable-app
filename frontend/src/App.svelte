@@ -138,7 +138,18 @@
         let bellPeriods = [];
         let genResult = null;
 	let usePrecise = false;
-	let solveTimeoutSec = 0;
+	// Таймаут точной генерации (сек): 0 — без лимита. Предустановки 30 / 90,
+	// либо «другое» с произвольным значением.
+	let solveTimeoutPreset = "none"; // "none" | "30" | "90" | "custom"
+	let solveTimeoutCustom = "";
+	$: solveTimeoutSec = (() => {
+		if (solveTimeoutPreset === "none") return 0;
+		if (solveTimeoutPreset === "custom") {
+			const v = parseInt(solveTimeoutCustom, 10);
+			return isNaN(v) || v < 0 ? 0 : v;
+		}
+		return parseInt(solveTimeoutPreset, 10);
+	})();
 	let isGenerating = false;
 	let genID = 0;
 	let pollInterval = null;
@@ -1715,6 +1726,18 @@ function cellSubs(kind, id, day, slot) {
                                                 <button class="primary" on:click={generate} disabled={isGenerating}>{isGenerating ? "⏳ Генерирую..." : "⚙ Сгенерировать"}</button>
                                                 <button on:click={undo} disabled={isGenerating}>↶ Отменить</button>
                                                 <label class="chk" class:warn={!hasPreciseSolver} title={hasPreciseSolver ? "OR-Tools CP-SAT доступен в этой сборке" : "OR-Tools CP-SAT НЕ скомпилирован в эту сборку — будет использован быстрый эвристический решатель"}><input type="checkbox" bind:checked={usePrecise} disabled={isGenerating} /> точный CP-SAT (OR-Tools){#if !hasPreciseSolver} <span class="badge-warn">недоступно</span>{/if}</label>
+                                                <label class="chk" disabled={isGenerating || !usePrecise}>
+                                                        таймаут CP-SAT:
+                                                        <select bind:value={solveTimeoutPreset} disabled={isGenerating || !usePrecise}>
+                                                                <option value="none">без лимита</option>
+                                                                <option value="30">30 сек</option>
+                                                                <option value="90">90 сек</option>
+                                                                <option value="custom">другое</option>
+                                                        </select>
+                                                        {#if solveTimeoutPreset === "custom"}
+                                                                <input type="number" bind:value={solveTimeoutCustom} min="0" style="width:5ch" disabled={isGenerating || !usePrecise} />
+                                                        {/if}
+                                                </label>
 <span class="sep"></span>
 <label>Вид:
                                                         <select bind:value={viewMode} disabled={isGenerating}>
