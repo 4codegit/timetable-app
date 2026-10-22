@@ -114,10 +114,10 @@ func drawASCPrintCell(pdf *gopdf.GoPdf, opts Options, cell Cell, ok bool, x, y, 
 	}
 }
 
-// drawPrintCellText stacks the cell content on three centered lines —
-// the full subject name (bold) on top, then the teacher, then the room
-// number, each on its own line. Every line shrinks just enough to fit
-// the cell width on one line — no wrapping.
+// drawPrintCellText stacks the cell content on centered lines —
+// the subject name (bold) on top, then class + optional teacher/room.
+// All modes show subject + class together so it's clear what lesson
+// it is and which class it belongs to.
 func drawPrintCellText(pdf *gopdf.GoPdf, opts Options, cell Cell, x, y, w, h float64, subjColor, teachColor, roomColor string) {
 	subj := opts.SubjectName(cell.SubjectID)
 	if subj == "" {
@@ -140,8 +140,7 @@ func drawPrintCellText(pdf *gopdf.GoPdf, opts Options, cell Cell, x, y, w, h flo
 
 	var lines []ascLine
 	// Режим «по учителям»: страница принадлежит учителю, поэтому ячейка
-	// показывает КЛАСС (первой строкой, жирным), затем предмет. Кабинет
-	// не нужен — учитель ходит по кабинетам, но это их не касается.
+	// показывает КЛАСС (первой строкой, жирным), затем предмет.
 	if opts.Mode == "teacher" {
 		if cls := opts.ClassName(cell.ClassID); cls != "" && cls != "?" {
 			s, sz := fitLine(cls, "DejaVu-Bold", 8.5, 5.0)
@@ -152,17 +151,22 @@ func drawPrintCellText(pdf *gopdf.GoPdf, opts Options, cell Cell, x, y, w, h flo
 		ascCenterLines(pdf, x, y, w, h, lines)
 		return
 	}
+	// Все остальные режимы: показываем предмет + класс вместе.
 	s, sz := fitLine(subj, "DejaVu-Bold", 8.5, 5.0)
 	lines = append(lines, ascLine{Text: s, Size: sz, Bold: true, Color: subjColor})
+	if cls := opts.ClassName(cell.ClassID); cls != "" && cls != "?" {
+		s, sz := fitLine(cls, "DejaVu", 6.5, 4.5)
+		lines = append(lines, ascLine{Text: s, Size: sz, Color: teachColor})
+	}
 	if opts.ShowTeacher {
 		if t := opts.TeacherName(cell.TeacherID); t != "" {
-			s, sz := fitLine(t, "DejaVu", 6.5, 4.5)
+			s, sz := fitLine(t, "DejaVu", 6, 4.0)
 			lines = append(lines, ascLine{Text: s, Size: sz, Color: teachColor})
 		}
 	}
 	if opts.ShowRoom {
 		if rn := opts.RoomName(cell.RoomID); rn != "" && rn != "?" {
-			s, sz := fitLine(rn, "DejaVu", 6.5, 4.5)
+			s, sz := fitLine(rn, "DejaVu", 6, 4.0)
 			lines = append(lines, ascLine{Text: s, Size: sz, Color: roomColor})
 		}
 	}

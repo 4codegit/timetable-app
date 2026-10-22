@@ -78,8 +78,16 @@ export function Generate(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['Generate'](arg1, arg2, arg3, arg4);
 }
 
-export function GeneratePrecise(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['GeneratePrecise'](arg1, arg2, arg3, arg4);
+export function GeneratePrecise(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['GeneratePrecise'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function GetGenerationProgress(arg1) {
+  return window['go']['main']['App']['GetGenerationProgress'](arg1);
+}
+
+export function StartPreciseGeneration(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['StartPreciseGeneration'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function GetSchoolSettings(arg1) {

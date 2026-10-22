@@ -55,13 +55,12 @@ func (s *Store) migrate() error {
 			name TEXT NOT NULL,
 			settings_json TEXT NOT NULL DEFAULT '{}'
 		)`,
-		`CREATE TABLE IF NOT EXISTS teachers (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
-			name TEXT NOT NULL,
-			short_name TEXT,
-			max_hours_per_week INTEGER DEFAULT 30
-		)`,
+			`CREATE TABLE IF NOT EXISTS teachers (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+				name TEXT NOT NULL,
+				short_name TEXT
+			)`,
 		`CREATE TABLE IF NOT EXISTS subjects (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
@@ -192,10 +191,9 @@ func (s *Store) migrate() error {
 		if err := rebuild("teachers",
 			`id INTEGER PRIMARY KEY AUTOINCREMENT,
 			 school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
-			 name TEXT NOT NULL,
-			 short_name TEXT,
-			 max_hours_per_week INTEGER DEFAULT 30`,
-			`INSERT INTO teachers_new SELECT id, school_id, name, short_name, max_hours_per_week FROM teachers`); err != nil {
+				name TEXT NOT NULL,
+				short_name TEXT`,
+				`INSERT INTO teachers_new SELECT id, school_id, name, short_name FROM teachers`); err != nil {
 			return err
 		}
 	}
@@ -330,8 +328,8 @@ func (s *Store) UpdateSchoolSettings(id int, settings string) error {
 // ---- Teachers ----
 
 func (s *Store) CreateTeacher(t domain.Teacher) (*domain.Teacher, error) {
-	res, err := s.db.Exec(`INSERT INTO teachers (school_id, name, short_name, max_hours_per_week) VALUES (?,?,?,?)`,
-		t.SchoolID, t.Name, t.ShortName, t.MaxHoursPerWeek)
+	res, err := s.db.Exec(`INSERT INTO teachers (school_id, name, short_name) VALUES (?,?,?)`,
+		t.SchoolID, t.Name, t.ShortName)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +339,7 @@ func (s *Store) CreateTeacher(t domain.Teacher) (*domain.Teacher, error) {
 }
 
 func (s *Store) ListTeachers(schoolID int) ([]domain.Teacher, error) {
-	rows, err := s.db.Query(`SELECT id, school_id, name, short_name, max_hours_per_week FROM teachers WHERE school_id=?`, schoolID)
+	rows, err := s.db.Query(`SELECT id, school_id, name, short_name FROM teachers WHERE school_id=?`, schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +347,7 @@ func (s *Store) ListTeachers(schoolID int) ([]domain.Teacher, error) {
 	var out []domain.Teacher
 	for rows.Next() {
 		var t domain.Teacher
-		if err := rows.Scan(&t.ID, &t.SchoolID, &t.Name, &t.ShortName, &t.MaxHoursPerWeek); err != nil {
+			if err := rows.Scan(&t.ID, &t.SchoolID, &t.Name, &t.ShortName); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -501,8 +499,8 @@ func (s *Store) UpdateLesson(l domain.Lesson) error {
 }
 
 func (s *Store) UpdateTeacher(t domain.Teacher) error {
-	_, err := s.db.Exec(`UPDATE teachers SET name=?, short_name=?, max_hours_per_week=? WHERE id=?`,
-		t.Name, t.ShortName, t.MaxHoursPerWeek, t.ID)
+	_, err := s.db.Exec(`UPDATE teachers SET name=?, short_name=? WHERE id=?`,
+		t.Name, t.ShortName, t.ID)
 	return err
 }
 

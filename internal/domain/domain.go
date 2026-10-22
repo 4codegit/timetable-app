@@ -9,11 +9,10 @@ type School struct {
 
 // Teacher teaches lessons.
 type Teacher struct {
-	ID              int    `json:"id"`
-	SchoolID        int    `json:"school_id"`
-	Name            string `json:"name"`
-	ShortName       string `json:"short_name"`
-	MaxHoursPerWeek int    `json:"max_hours_per_week"`
+	ID        int    `json:"id"`
+	SchoolID  int    `json:"school_id"`
+	Name      string `json:"name"`
+	ShortName string `json:"short_name"`
 }
 
 // Subject is a course taught (Math, Physics, ...).

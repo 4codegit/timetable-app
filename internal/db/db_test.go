@@ -19,7 +19,7 @@ func TestStoreCRUD(t *testing.T) {
 	}
 	sid := sc.ID
 
-	te, _ := s.CreateTeacher(domain.Teacher{SchoolID: sid, Name: "Иванов", MaxHoursPerWeek: 30})
+	te, _ := s.CreateTeacher(domain.Teacher{SchoolID: sid, Name: "Иванов"})
 	if _, err := s.CreateSubject(domain.Subject{SchoolID: sid, Name: "Математика"}); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestSwapEntries(t *testing.T) {
 	}
 	sid := sc.ID
 
-	te, _ := s.CreateTeacher(domain.Teacher{SchoolID: sid, Name: "Иванов", MaxHoursPerWeek: 30})
+	te, _ := s.CreateTeacher(domain.Teacher{SchoolID: sid, Name: "Иванов"})
 	s.CreateSubject(domain.Subject{SchoolID: sid, Name: "Математика"})
 	s.CreateClass(domain.SchoolClass{SchoolID: sid, Name: "10А"})
 	s.CreateRoom(domain.Room{SchoolID: sid, Name: "301"})

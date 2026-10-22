@@ -36,6 +36,7 @@ type Result struct {
 	Placed     int                    `json:"placed"`
 	Total      int                    `json:"total"`
 	Violations int                    `json:"violations"` // soft constraint violations
+	ElapsedMs  int64                  `json:"elapsed_ms"` // wall-clock time spent solving
 }
 
 // prepareDaysMask applies Config.DaysMask (school-day checkboxes): the
@@ -114,6 +115,8 @@ func Solve(ctx context.Context, in SolveInput, parallelism int, timeout time.Dur
 		}
 	}
 
+	start := time.Now()
+
 	workerCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -133,6 +136,7 @@ func Solve(ctx context.Context, in SolveInput, parallelism int, timeout time.Dur
 		}(time.Now().UnixNano() + int64(w*7919))
 	}
 	wg.Wait()
+	best.ElapsedMs = time.Since(start).Milliseconds()
 	return best
 }
 
@@ -1177,17 +1181,22 @@ func HasPreciseSolver() bool {
 // SolvePrecise prefers the OR-Tools CP-SAT solver when compiled in; otherwise falls back to the
 // pure-Go backtracking solver so the default build always works.
 func SolvePrecise(ctx context.Context, in SolveInput, parallelism int, timeout time.Duration) Result {
+	start := time.Now()
 	if preciseSolver != nil {
 		r, ok := preciseSolver(in, parallelism, timeout)
 		if ok && r.Placed >= r.Total {
+			r.ElapsedMs = time.Since(start).Milliseconds()
 			return r // всё размещено — эвристика не нужна
 		}
 		// Школа перегружена или модель тяжёлая: эвристика может
 		// разместить больше — считаем её и берём лучший результат.
 		h := Solve(ctx, in, parallelism, timeout)
+		totalMs := time.Since(start).Milliseconds()
 		if h.Placed > r.Placed || !ok {
+			h.ElapsedMs = totalMs
 			return h
 		}
+		r.ElapsedMs = totalMs
 		return r
 	}
 	return Solve(ctx, in, parallelism, timeout)

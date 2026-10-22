@@ -35,10 +35,10 @@ func TestRefsJSONFlow(t *testing.T) {
 	id := sc.ID
 
 	// teachers
-	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванов", ShortName: "Ив", MaxHoursPerWeek: 30}); err != nil {
+	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванов", ShortName: "Ив"}); err != nil {
 		t.Fatalf("CreateTeacher: %v", err)
 	}
-	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Петрова", ShortName: "Пт", MaxHoursPerWeek: 25}); err != nil {
+	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Петрова", ShortName: "Пт"}); err != nil {
 		t.Fatalf("CreateTeacher: %v", err)
 	}
 
@@ -88,10 +88,10 @@ func TestGenerate(t *testing.T) {
 	id := sc.ID
 
 	// Create reference data
-	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванов И.И.", ShortName: "Иванов", MaxHoursPerWeek: 30}); err != nil {
+	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванов И.И.", ShortName: "Иванов"}); err != nil {
 		t.Fatalf("CreateTeacher: %v", err)
 	}
-	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Петрова П.П.", ShortName: "Петрова", MaxHoursPerWeek: 25}); err != nil {
+	if _, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Петрова П.П.", ShortName: "Петрова"}); err != nil {
 		t.Fatalf("CreateTeacher: %v", err)
 	}
 	if _, err := a.CreateSubject(domain.Subject{SchoolID: id, Name: "Математика", ShortName: "Мат", RequiresRoomType: "any"}); err != nil {
@@ -208,7 +208,7 @@ func TestImportAllClearsExistingData(t *testing.T) {
 	id := sc.ID
 
 	// Add initial data
-	a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Старый Учитель", MaxHoursPerWeek: 30})
+	a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Старый Учитель"})
 	a.CreateSubject(domain.Subject{SchoolID: id, Name: "Старый Предмет"})
 	teachers1, _ := a.ListTeachers(id)
 	if len(teachers1) != 1 {
@@ -218,7 +218,7 @@ func TestImportAllClearsExistingData(t *testing.T) {
 	// Import snapshot into existing school (should clear old data)
 	snap := `{
                 "school": {"id": ` + fmt.Sprintf("%d", id) + `, "name": "Импорт Тест"},
-                "teachers": [{"name": "Новый Учитель", "max_hours_per_week": 25}],
+                "teachers": [{"name": "Новый Учитель"}],
                 "subjects": [{"name": "Новый Предмет"}],
                 "classes": [],
                 "rooms": [],
@@ -258,7 +258,7 @@ func TestExportImportRoundTripPreservesSchedule(t *testing.T) {
 	if err := source.UpdateSchoolSettings(school.ID, `{"days":5,"slots":7}`); err != nil {
 		t.Fatal(err)
 	}
-	teacher, err := source.CreateTeacher(domain.Teacher{SchoolID: school.ID, Name: "Иванова", MaxHoursPerWeek: 24})
+	teacher, err := source.CreateTeacher(domain.Teacher{SchoolID: school.ID, Name: "Иванова"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestSwapEntriesIntegration(t *testing.T) {
 	}
 	id := sc.ID
 
-	te, _ := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванов", MaxHoursPerWeek: 30})
+	te, _ := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванов"})
 	a.CreateSubject(domain.Subject{SchoolID: id, Name: "Математика"})
 	a.CreateClass(domain.SchoolClass{SchoolID: id, Name: "10А"})
 	a.CreateRoom(domain.Room{SchoolID: id, Name: "301"})
@@ -477,7 +477,7 @@ func TestExportPDF(t *testing.T) {
 	if err := a.UpdateSchoolSettings(id, `{"days":5,"slots":6}`); err != nil {
 		t.Fatal(err)
 	}
-	te, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванова А.Б.", ShortName: "Ив", MaxHoursPerWeek: 30})
+	te, err := a.CreateTeacher(domain.Teacher{SchoolID: id, Name: "Иванова А.Б.", ShortName: "Ив"})
 	if err != nil {
 		t.Fatalf("CreateTeacher: %v", err)
 	}

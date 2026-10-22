@@ -42,7 +42,11 @@ export function ExportRefsCSV(arg1:number,arg2:string):Promise<string>;
 
 export function Generate(arg1:number,arg2:number,arg3:number,arg4:number):Promise<solver.Result>;
 
-export function GeneratePrecise(arg1:number,arg2:number,arg3:number,arg4:number):Promise<solver.Result>;
+export function GeneratePrecise(arg1:number,arg2:number,arg3:number,arg4:number,arg5:number):Promise<solver.Result>;
+
+export function GetGenerationProgress(arg1:number):Promise<solver.GenProgress>;
+
+export function StartPreciseGeneration(arg1:number,arg2:number,arg3:number,arg4:number,arg5:number):Promise<number>;
 
 export function GetSchoolSettings(arg1:number):Promise<string>;
 

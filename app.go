@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"timetable/internal/db"
@@ -20,6 +21,59 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// generationState tracks live progress of an in-progress precise generation.
+type generationState struct {
+	mu     sync.RWMutex
+	states map[int64]*GenProgress
+	nextID int64
+}
+
+type GenProgress struct {
+	ID      int64  `json:"id"`
+	Placed  int    `json:"placed"`
+	Total   int    `json:"total"`
+	Status  string `json:"status"`
+	Error   string `json:"error,omitempty"`
+}
+
+var genState = &generationState{
+	states: make(map[int64]*GenProgress),
+}
+
+func (g *generationState) newID() int64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.nextID++
+	return g.nextID
+}
+
+func (g *generationState) set(id int64, placed, total int, status string, err string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if s, ok := g.states[id]; ok {
+		s.Placed = placed
+		s.Total = total
+		s.Status = status
+		s.Error = err
+	}
+}
+
+func (g *generationState) get(id int64) (GenProgress, bool) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	s, ok := g.states[id]
+	if !ok {
+		return GenProgress{}, false
+	}
+	return *s, true
+}
+
+func (g *generationState) delete(id int64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.states, id)
+}
 
 // App is the Wails-bound backend.
 type App struct {
@@ -290,18 +344,44 @@ func (a *App) ReplaceSchedule(schoolID int, entries []domain.ScheduleEntry) erro
 	return a.store.ReplaceSchedule(schoolID, entries)
 }
 
-// GeneratePrecise prefers the OR-Tools CP-SAT solver (when compiled with -tags ortools),
-// otherwise falls back to the pure-Go backtracking solver.
-func (a *App) GeneratePrecise(schoolID, days, slots, daysMask int) (*solver.Result, error) {
+// StartPreciseGeneration launches OR-Tools CP-SAT (or pure-Go fallback) in a
+// background goroutine and returns a generation ID immediately. The frontend
+// polls GetGenerationProgress to show a live progress bar.
+// solveTimeoutSec == 0 means no time limit — solver runs until finished.
+func (a *App) StartPreciseGeneration(schoolID, days, slots, daysMask, solveTimeoutSec int) int64 {
 	in, err := a.loadSolveInput(schoolID, days, slots, daysMask)
 	if err != nil {
-		return nil, err
+		id := genState.newID()
+		genState.set(id, 0, 0, "error", err.Error())
+		return id
 	}
-	res := solver.SolvePrecise(a.ctx, in, runtime.NumCPU(), 12*time.Second)
-	if err := a.store.ReplaceSchedule(schoolID, res.Entries); err != nil {
-		return nil, err
+	timeout := time.Duration(solveTimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 0 // без лимита — solver работает до завершения
 	}
-	return &res, nil
+	id := genState.newID()
+	genState.set(id, 0, 0, "running", "")
+
+	go func() {
+		res := solver.SolvePrecise(a.ctx, in, runtime.NumCPU(), timeout)
+		if err := a.store.ReplaceSchedule(schoolID, res.Entries); err != nil {
+			genState.set(id, res.Placed, res.Total, "error", err.Error())
+			return
+		}
+		genState.set(id, res.Placed, res.Total, "done", "")
+	}()
+
+	return id
+}
+
+// GetGenerationProgress returns the current progress of a running generation.
+// The frontend polls this to show a live % progress bar.
+func (a *App) GetGenerationProgress(id int64) GenProgress {
+	p, ok := genState.get(id)
+	if !ok {
+		return GenProgress{ID: id, Status: "error", Error: "generation not found"}
+	}
+	return p
 }
 
 // ---- School settings (grid size + bell schedule) ----

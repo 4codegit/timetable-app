@@ -213,7 +213,7 @@ func intPtr(v int) *int { return &v }
 func synthSchool(nClasses int) SolveInput {
 	teachers := map[int]domain.Teacher{}
 	for i := 1; i <= nClasses; i++ {
-		teachers[i] = domain.Teacher{ID: i, Name: fmt.Sprintf("Учитель %d", i), MaxHoursPerWeek: 34}
+		teachers[i] = domain.Teacher{ID: i, Name: fmt.Sprintf("Учитель %d", i)}
 	}
 	subjects := map[int]domain.Subject{}
 	subjNames := []string{"Математика", "Физика", "Химия", "Литература", "История", "Английский", "Информатика", "Физкультура"}

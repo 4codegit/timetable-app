@@ -7,7 +7,7 @@
                 CreateConstraint, ListConstraints, DeleteConstraint,
                 DeleteTeacher, DeleteSubject, DeleteClass, DeleteRoom, DeleteScheduleEntry, SaveExport,
                 UpdateTeacher, UpdateSubject, UpdateClass, UpdateRoom,
-                Generate, GeneratePrecise, MoveEntry, SwapEntries, ReplaceSchedule, ListSchedule, ExportAll, ImportAll, ScheduleCSV, GetSchoolSettings, UpdateSchoolSettings, HasPreciseSolver, ExportPDF
+                Generate, MoveEntry, SwapEntries, ReplaceSchedule, ListSchedule, ExportAll, ImportAll, ScheduleCSV, GetSchoolSettings, UpdateSchoolSettings, HasPreciseSolver, ExportPDF, StartPreciseGeneration, GetGenerationProgress
         } from "../wailsjs/go/main/App";
         import { onMount } from "svelte";
 
@@ -46,7 +46,7 @@
         }
 
         // form models
-        let t = { name: "", short_name: "", max_hours_per_week: 30 };
+        let t = { name: "", short_name: "" };
         let s = { name: "", short_name: "", requires_room_type: "any" };
         let c = { name: "", room_id: 0, subgroup_of: null };
         let r = { name: "", room_type: "any" };
@@ -58,7 +58,7 @@
         function startEdit(kind, id) { editing = { kind, id }; }
         async function cancelEdit() { editing = null; await reloadRefs(); }
         async function saveEdit(kind, x) {
-                if (kind === "teacher") await UpdateTeacher({ id: x.id, school_id: x.school_id, name: x.name, short_name: x.short_name, max_hours_per_week: x.max_hours_per_week || 0 });
+                if (kind === "teacher") await UpdateTeacher({ id: x.id, school_id: x.school_id, name: x.name, short_name: x.short_name });
                 else if (kind === "subject") await UpdateSubject({ id: x.id, school_id: x.school_id, name: x.name, short_name: x.short_name, requires_room_type: x.requires_room_type || "any" });
 	                else if (kind === "class") await UpdateClass({ id: x.id, school_id: x.school_id, name: x.name, room_id: x.room_id || 0, subgroup_of: x.subgroup_of ?? null });
                 else if (kind === "room") await UpdateRoom({ id: x.id, school_id: x.school_id, name: x.name, room_type: x.room_type || "any" });
@@ -137,7 +137,11 @@
                 : Array.from({ length: Math.min(days, 7) }, (_, d) => d);
         let bellPeriods = [];
         let genResult = null;
-        let usePrecise = false;
+	let usePrecise = false;
+	let solveTimeoutSec = 0;
+	let isGenerating = false;
+	let genID = 0;
+	let pollInterval = null;
         // hasPreciseSolver is loaded once from the backend so the UI can tell the
         // user the truth: if the binary was NOT compiled with -tags ortools, the
         // "точный CP-SAT (OR-Tools)" checkbox silently runs the pure-Go fallback.
@@ -166,11 +170,11 @@
                 for (const c of list) if (!out.includes(c)) out.push(c);
                 return out;
         }
-        $: rows = kind === "teacher"
-                ? teachers.map((t) => ({ id: t.id, label: t.name }))
-                : kind === "room"
-                ? rooms.map((r) => ({ id: r.id, label: r.name }))
-                : orderClasses(classes.map((c) => ({ id: c.id, label: c.name, subgroup_of: c.subgroup_of }))).filter((c) => !c.subgroup_of);
+$: rows = kind === "teacher"
+		? teachers.map((t) => ({ id: t.id, label: t.name }))
+		: kind === "room"
+		? rooms.map((r) => ({ id: r.id, label: r.name }))
+		: orderClasses(classes.map((c) => ({ id: c.id, label: c.name, subgroup_of: c.subgroup_of }))).filter((c) => !c.subgroup_of);
 
         // PDF следует выбранному «Виду» на экране — что видите, то и в файле.
         $: exportMode = viewMode;
@@ -437,7 +441,7 @@
                 return ids;
         }
 
-        let report = { conflicts: [], unplaced: [], overloads: [], violations: [], classStats: [], reasonGroups: [], totalHours: 0, placedHours: 0, missingHours: 0, placedPct: 100 };
+        let report = { conflicts: [], unplaced: [], violations: [], classStats: [], reasonGroups: [], totalHours: 0, placedHours: 0, missingHours: 0, placedPct: 100 };
         function computeConflictReport() {
                 // Та же логика: учитель/кабинет по значению, классы —
                 // попарным пересечением тел (целый класс vs подгруппа).
@@ -607,8 +611,9 @@
                         g.items.push(u);
                 }
                 reasonGroups.sort((a, b) => b.items.length - a.items.length);
-                const overloads = teachers.filter((t) => t.max_hours_per_week && (teacherHours[t.id] || 0) > t.max_hours_per_week)
-                        .map((t) => ({ name: t.name, max: t.max_hours_per_week, got: teacherHours[t.id] || 0 }));
+                const teacherStats = teachers.filter((t) => teacherHours[t.id] || 0)
+                        .map((t) => ({ name: t.name, placed: teacherHours[t.id] || 0 }))
+                        .sort((a, b) => b.placed - a.placed || a.name.localeCompare(b.name));
                 const violations = [];
                 for (const c of constraints) {
                         if (!c.is_hard) continue;
@@ -633,7 +638,7 @@
                                 });
                         }
                 }
-                return { conflicts, unplaced, overloads, violations, classStats, reasonGroups, totalHours, placedHours, missingHours, placedPct };
+                return { conflicts, unplaced, violations, classStats, teacherStats, reasonGroups, totalHours, placedHours, missingHours, placedPct };
         }
         // Same syntactic-dependency rule as buildGrid above: pass the state
         // this report is derived from as explicit arguments.
@@ -657,7 +662,7 @@
         async function addTeacher() {
                 if (!t.name.trim()) { flash("Введите имя учителя"); return; }
                 await CreateTeacher({ ...t, school_id: activeSchoolID });
-                t = { name: "", short_name: "", max_hours_per_week: 30 };
+                t = { name: "", short_name: "" };
                 await reloadRefs();
         }
         async function addSubject() {
@@ -720,37 +725,63 @@
         async function removeConstraint(id) { await DeleteConstraint(id); await reloadRefs(); flash("Ограничение удалено"); }
         async function removeEntry(id) { await pushHistory(); await DeleteScheduleEntry(id); await reloadSchedule(); }
 
-        async function generate() {
-                await pushHistory();
-                if (!lessons.length) { flash("Нет уроков в учебном плане — добавьте их на вкладке «Уроки»."); history.pop(); return; }
-                const occurrences = lessons.reduce((a, l) => a + (l.hours_per_week || 0), 0);
-                if (!usePrecise && occurrences > 200) {
-                        usePrecise = true;
-                        if (hasPreciseSolver) {
-                                flash("Крупная школа: включён точный CP-SAT (OR-Tools).");
-                        } else {
-                                flash("Крупная школа: OR-Tools недоступен в этой сборке — используется быстрый эвристический решатель (может не разместить все уроки).");
-                        }
-                }
-                try {
-                        genResult = (usePrecise ? await GeneratePrecise(activeSchoolID, days, slots, schoolDaysMask) : await Generate(activeSchoolID, days, slots, schoolDaysMask)) || {};
-                        await reloadSchedule();
-                        flash(`Размещено ${genResult.placed}/${genResult.total}, нарушений (мягких): ${genResult.violations}`);
-                } catch (e) {
-                        flash("Ошибка генерации: " + (e && e.message ? e.message : e));
-                }
-        }
-        async function generatePrecise() {
-                await pushHistory();
-                if (!lessons.length) { flash("Нет уроков в учебном плане — добавьте их на вкладке «Уроки»."); history.pop(); return; }
-                try {
-                        genResult = await GeneratePrecise(activeSchoolID, days, slots, schoolDaysMask);
-                        await reloadSchedule();
-                        flash(`CP-SAT: размещено ${genResult.placed}/${genResult.total}`);
-                } catch (e) {
-                        flash("Ошибка генерации: " + (e && e.message ? e.message : e));
-                }
-        }
+	async function generate() {
+			await pushHistory();
+			if (!lessons.length) { flash("Нет уроков в учебном плане — добавьте их на вкладке «Уроки»."); history.pop(); return; }
+			const occurrences = lessons.reduce((a, l) => a + (l.hours_per_week || 0), 0);
+			if (!usePrecise && occurrences > 200) {
+					usePrecise = true;
+					if (hasPreciseSolver) {
+							flash("Крупная школа: включён точный CP-SAT (OR-Tools).");
+					} else {
+							flash("Крупная школа: OR-Tools недоступен в этой сборке — используется быстрый эвристический решатель (может не разместить все уроки).");
+					}
+			}
+			if (usePrecise) {
+					return await generatePrecise();
+			}
+			try {
+					isGenerating = true;
+					const t0 = performance.now();
+					genResult = await Generate(activeSchoolID, days, slots, schoolDaysMask) || {};
+					await reloadSchedule();
+					isGenerating = false;
+					const dt = Math.round(performance.now() - t0);
+					flash(`Размещено ${genResult.placed}/${genResult.total}, нарушений (мягких): ${genResult.violations} (${dt} с)`);
+			} catch (e) {
+					isGenerating = false;
+					flash("Ошибка генерации: " + (e && e.message ? e.message : e));
+			}
+	}
+	async function generatePrecise() {
+			await pushHistory();
+			if (!lessons.length) { flash("Нет уроков в учебном плане — добавьте их на вкладке «Уроки»."); history.pop(); return; }
+			try {
+					isGenerating = true;
+					genID = await StartPreciseGeneration(activeSchoolID, days, slots, schoolDaysMask, solveTimeoutSec);
+					pollInterval = setInterval(async () => {
+							const p = await GetGenerationProgress(genID);
+							if (p.Status === "done" || p.Status === "error") {
+									clearInterval(pollInterval);
+									pollInterval = null;
+									isGenerating = false;
+									await reloadSchedule();
+									if (p.Status === "error") {
+											flash("Ошибка генерации: " + (p.Error || "неизвестная ошибка"));
+											return;
+									}
+									genResult = { placed: p.Placed, total: p.Total, violations: 0, elapsed_ms: 0 };
+									flash(`CP-SAT: размещено ${p.Placed}/${p.Total}`);
+							} else {
+									genResult = { placed: p.Placed, total: p.Total, violations: 0, elapsed_ms: 0 };
+							}
+					}, 500);
+			} catch (e) {
+					isGenerating = false;
+					if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+					flash("Ошибка генерации: " + (e && e.message ? e.message : e));
+			}
+	}
         // applyMove performs a true optimistic move/swap.
         //
         // Old behavior: await backend → update local schedule → reload from
@@ -1050,7 +1081,9 @@
                         catch (err) { flash("Ошибка: " + (err && err.message ? err.message : err)); }
                         selectedEntry = null;
                 } else {
-                        selectedEntry = (selectedEntry && selectedEntry.id === pd.id) ? null : { id: pd.id };
+                        const isSame = selectedEntry && selectedEntry.id === pd.id;
+                        selectedEntry = isSame ? null : { id: pd.id };
+                        selectedClassId = isSame ? null : pd.rowId;
                 }
         }
         function onPointerCancel() {
@@ -1099,25 +1132,25 @@
                 };
         }
 
-        // cellSubs: остальные уроки в той же ячейке (параллельные подгруппы,
-        // либо дубль-конфликт того же учителя/кабинета). Первая запись под
-        // ключом — сама ячейка (cellAt) и исключается; для класса ячейка
-        // родителя дополнительно читает ключи его подгрупп.
-        function cellSubs(kind, id, day, slot) {
-                const { idx, pos } = scheduleIndex;
-                const self = idx.get(cellKey(kind, id, day, slot)) || [];
-                const excludeId = self.length ? self[0].id : -1;
-                if (kind !== "class") {
-                        return self.filter((en) => en.id !== excludeId);
-                }
-                const merged = self.slice();
-                for (const kid of (kidsOf.get(id) || [])) {
-                        const kidArr = idx.get(cellKey("class", kid, day, slot));
-                        if (kidArr) for (const en of kidArr) merged.push(en);
-                }
-                merged.sort((a, b) => pos.get(a.id) - pos.get(b.id));
-                return merged.filter((en) => en.id !== excludeId);
+// cellSubs: остальные уроки в той же ячейке (параллельные подгруппы,
+// либо дубль-конфликт того же учителя/кабинета). Первая запись под
+// ключом — сама ячейка (cellAt) и исключается; для класса ячейка
+// родителя дополнительно читает ключи его подгрупп.
+function cellSubs(kind, id, day, slot) {
+        const { idx, pos } = scheduleIndex;
+        const self = idx.get(cellKey(kind, id, day, slot)) || [];
+        const excludeId = self.length ? self[0].id : -1;
+        if (kind !== "class") {
+                return self.filter((en) => en.id !== excludeId);
         }
+        const merged = self.slice();
+        for (const kid of (kidsOf.get(id) || [])) {
+                const kidArr = idx.get(cellKey("class", kid, day, slot));
+                if (kidArr) for (const en of kidArr) merged.push(en);
+        }
+        merged.sort((a, b) => pos.get(a.id) - pos.get(b.id));
+        return merged.filter((en) => en.id !== excludeId);
+}
         // Тело класса: сам класс + его подгруппы.
         function classBody(classId) {
                 return [classId, ...(kidsOf.get(classId) || [])];
@@ -1270,7 +1303,7 @@
         // имена вместо id — файл переносим между школами и базами.
         async function downloadRefsJSON(entity) {
                 let data;
-                if (entity === "teachers") data = teachers.map((t) => ({ name: t.name, short_name: t.short_name || "", max_hours_per_week: t.max_hours_per_week || 0 }));
+                if (entity === "teachers") data = teachers.map((t) => ({ name: t.name, short_name: t.short_name || "" }));
                 else if (entity === "subjects") data = subjects.map((s) => ({ name: s.name, short_name: s.short_name || "", requires_room_type: s.requires_room_type || "any" }));
                 else if (entity === "rooms") data = rooms.map((r) => ({ name: r.name, room_type: r.room_type || "any" }));
                 else if (entity === "classes") data = classes.map((c) => ({ name: c.name, room: c.room_id ? (roomName(rooms, c.room_id) || "") : "", subgroup_of: c.subgroup_of ? (className(classes, c.subgroup_of) || "") : "" }));
@@ -1289,7 +1322,7 @@
                         for (const it of items) {
                                 if (entity === "teachers") {
                                         if (!it.name) continue;
-                                        await CreateTeacher({ school_id: activeSchoolID, name: String(it.name), short_name: String(it.short_name || ""), max_hours_per_week: Number(it.max_hours_per_week) || 30 });
+                                        await CreateTeacher({ school_id: activeSchoolID, name: String(it.name), short_name: String(it.short_name || "") });
                                 } else if (entity === "subjects") {
                                         if (!it.name) continue;
                                         await CreateSubject({ school_id: activeSchoolID, name: String(it.name), short_name: String(it.short_name || ""), requires_room_type: String(it.requires_room_type || "any") });
@@ -1416,6 +1449,7 @@
                         <button class:active={tab === "constraints"} on:click={() => tab = "constraints"}><span class="ico">⚠️</span>Ограничения</button>
                         <button class:active={tab === "settings"} on:click={() => tab = "settings"}><span class="ico">⚙️</span>Настройки</button>
                         <button class:active={tab === "schedule"} on:click={() => tab = "schedule"}><span class="ico">🗓️</span>Расписание</button>
+                        <button class:active={tab === "issues"} on:click={() => tab = "issues"}><span class="ico">🐛</span>Проблемы</button>
                 </nav>
         </aside>
 
@@ -1450,18 +1484,16 @@
                                                 <div class="row">
                                                         <input bind:value={t.name} placeholder="Имя" />
                                                         <input bind:value={t.short_name} placeholder="Кратко" />
-                                                        <input type="number" bind:value={t.max_hours_per_week} title="Часов/нед" />
                                                         <button class="primary" on:click={addTeacher}>+</button>
                                                 </div>
                                                 <ul class="list">{#each teachers as x}<li>
                                                         {#if editing && editing.kind === "teacher" && editing.id === x.id}
                                                                 <input class="edit" bind:value={x.name} placeholder="Имя" />
                                                                 <input class="edit w-s" bind:value={x.short_name} placeholder="Кратко" />
-                                                                <input class="edit w-xs" type="number" bind:value={x.max_hours_per_week} title="Часов/нед" />
                                                                 <button class="primary sm" on:click={() => saveEdit("teacher", x)} title="Сохранить">✓</button>
                                                                 <button class="sm" on:click={cancelEdit} title="Отмена">✗</button>
                                                         {:else}
-                                                                <span class="li-text">{x.name} <small>({x.short_name})</small> <span class="muted">— {x.max_hours_per_week}ч/нед</span></span>
+                                                                <span class="li-text">{x.name} <small>({x.short_name})</small></span>
                                                                 <button class="ghost-ico sm" on:click={() => startEdit("teacher", x.id)} title="Редактировать">✎</button>
                                                                 <button class="danger sm" on:click={() => removeTeacher(x.id)}>✕</button>
                                                         {/if}
@@ -1680,12 +1712,12 @@
                                 <section class="card">
                                         <div class="gen-bar">
                                                 <span class="grid-info">{days} дней · {slots} уроков в день</span>
-                                                <button class="primary" on:click={generate}>⚙ Сгенерировать</button>
-                                                <button on:click={undo}>↶ Отменить</button>
-                                                <label class="chk" class:warn={!hasPreciseSolver} title={hasPreciseSolver ? "OR-Tools CP-SAT доступен в этой сборке" : "OR-Tools CP-SAT НЕ скомпилирован в эту сборку — будет использован быстрый эвристический решатель"}><input type="checkbox" bind:checked={usePrecise} /> точный CP-SAT (OR-Tools){#if !hasPreciseSolver} <span class="badge-warn">недоступно</span>{/if}</label>
-                                                <span class="sep"></span>
-                                                <label>Вид:
-                                                        <select bind:value={viewMode}>
+                                                <button class="primary" on:click={generate} disabled={isGenerating}>{isGenerating ? "⏳ Генерирую..." : "⚙ Сгенерировать"}</button>
+                                                <button on:click={undo} disabled={isGenerating}>↶ Отменить</button>
+                                                <label class="chk" class:warn={!hasPreciseSolver} title={hasPreciseSolver ? "OR-Tools CP-SAT доступен в этой сборке" : "OR-Tools CP-SAT НЕ скомпилирован в эту сборку — будет использован быстрый эвристический решатель"}><input type="checkbox" bind:checked={usePrecise} disabled={isGenerating} /> точный CP-SAT (OR-Tools){#if !hasPreciseSolver} <span class="badge-warn">недоступно</span>{/if}</label>
+<span class="sep"></span>
+<label>Вид:
+                                                        <select bind:value={viewMode} disabled={isGenerating}>
                                                                 <option value="school">вся школа (обзор)</option>
                                                                 <option value="class">по классам</option>
                                                                 <option value="teacher">по учителям</option>
@@ -1693,37 +1725,43 @@
                                                         </select>
                                                 </label>
                                                 {#if !overviewMode}
-                                                <label class="chk"><input type="checkbox" bind:checked={compact} /> компактный</label>
+                                                <label class="chk"><input type="checkbox" bind:checked={compact} disabled={isGenerating} /> компактный</label>
                                                 {/if}
                                                 {#if !overviewMode && kind === "class" && rows.length > classesPerPage}
                                                         <span class="pager">
-                                                                <button class="sm" on:click={() => classPage = Math.max(0, classPage - 1)} disabled={classPage === 0}>‹</button>
+                                                                <button class="sm" on:click={() => classPage = Math.max(0, classPage - 1)} disabled={classPage === 0 || isGenerating}>‹</button>
                                                                 <span>{classPage + 1}/{totalClassPages}</span>
-                                                                <button class="sm" on:click={() => classPage = Math.min(totalClassPages - 1, classPage + 1)} disabled={classPage >= totalClassPages - 1}>›</button>
+                                                                <button class="sm" on:click={() => classPage = Math.min(totalClassPages - 1, classPage + 1)} disabled={classPage >= totalClassPages - 1 || isGenerating}>›</button>
                                                         </span>
                                                 {/if}
                                                 <span class="sep"></span>
+                                                {#if isGenerating && genResult}
+                                                <div class="gen-progress">
+                                                        <span class="prog-label">Генерация: {genResult.placed} из {genResult.total} ч</span>
+                                                        <div class="prog-bar"><div class="prog-fill" style="width:{genResult.total ? Math.round(genResult.placed / genResult.total * 100) : 0}%"></div></div>
+                                                        <span class="prog-pct">{genResult.total ? Math.round(genResult.placed / genResult.total * 100) : 0}%</span>
+                                                </div>
+                                                {/if}
                                                 <div class="export-panel">
                                                 <span class="panel-label">ЭКСПОРТ</span>
                                                 <label>Стр.:
-                                                        <select bind:value={pageSize}>
+                                                        <select bind:value={pageSize} disabled={isGenerating}>
                                                                 <option value="A0">A0</option><option value="A1">A1</option><option value="A2">A2</option><option value="A3">A3</option><option value="A4">A4</option>
                                                         </select>
                                                 </label>
                                                 <label>Ориент.:
-                                                        <select bind:value={orientation}>
-                                                                <option value="landscape">альбомн.</option>
-                                                                <option value="portrait">книжн.</option>
+                                                        <select bind:value={orientation} disabled={isGenerating}>
+                                                                <option value="landscape">альбомн.</option><option value="portrait">книжн.</option>
                                                         </select>
                                                 </label>
-                                                <label class="chk"><input type="checkbox" bind:checked={pdfShowTeacher} /> учителя</label>
-                                                <label class="chk"><input type="checkbox" bind:checked={pdfShowRoom} /> кабинеты</label>
-                                                <label class="chk"><input type="checkbox" bind:checked={pdfWeekdaysOnly} /> будни</label>
-                                                <label class="chk"><input type="checkbox" bind:checked={pdfBW} /> ч/б</label>
-                                                <button on:click={exportPDF}>⬇ PDF</button>
-                                                <button on:click={exportCSV}>⬇ CSV</button>
-                                                <button on:click={exportJSON}>⬇ JSON</button>
-                                                <label class="file">⬆ JSON<input type="file" accept="application/json" on:change={importJSON} /></label>
+                                                <label class="chk"><input type="checkbox" bind:checked={pdfShowTeacher} disabled={isGenerating} /> учителя</label>
+                                                <label class="chk"><input type="checkbox" bind:checked={pdfShowRoom} disabled={isGenerating} /> кабинеты</label>
+                                                <label class="chk"><input type="checkbox" bind:checked={pdfWeekdaysOnly} disabled={isGenerating} /> будни</label>
+                                                <label class="chk"><input type="checkbox" bind:checked={pdfBW} disabled={isGenerating} /> ч/б</label>
+                                                <button on:click={exportPDF} disabled={isGenerating}>⬇ PDF</button>
+                                                <button on:click={exportCSV} disabled={isGenerating}>⬇ CSV</button>
+                                                <button on:click={exportJSON} disabled={isGenerating}>⬇ JSON</button>
+                                                <label class="file">⬆ JSON<input type="file" accept="application/json" on:change={importJSON} disabled={isGenerating} /></label>
                                                 </div>
                                         </div>
                                         {#if genResult}<p class="status">Размещено <b>{genResult.placed}/{genResult.total}</b> · мягких нарушений: <b>{genResult.violations}</b></p>{/if}
@@ -1785,7 +1823,7 @@
                                                 </div>
                                                 {/if}
                                                 {#if ghost}<div class="drag-ghost" style="left:{ghost.x}px; top:{ghost.y}px;">{ghost.label}</div>{/if}
-                                                {#if report.conflicts.length || report.overloads.length || report.violations.length}
+                                                {#if report.conflicts.length || report.violations.length}
                                                         <div class="report">
                                                                 <h3>Отчёт по конфликтам</h3>
                                                                 {#if report.conflicts.length}
@@ -1796,11 +1834,6 @@
                                                                 {#if report.violations.length}
                                                                         <div class="rep-sec"><b>Нарушено жёсткое ограничение ({report.violations.length}):</b>
                                                                                 <ul>{#each report.violations as v}<li>{dayName(v.day)} П{v.slot + 1}: {v.what} — урок стоит в запрещённой ячейке</li>{/each}</ul>
-                                                                        </div>
-                                                                {/if}
-                                                                {#if report.overloads.length}
-                                                                        <div class="rep-sec"><b>Перегрузки учителей ({report.overloads.length}):</b>
-                                                                                <ul>{#each report.overloads as o}<li>{o.name} — {o.got}ч при лимите {o.max}ч</li>{/each}</ul>
                                                                         </div>
                                                                 {/if}
                                                         </div>
@@ -1845,6 +1878,124 @@
                                                         {/if}
                                                 </div>
                                         {/if}
+                                </section>
+                        {:else if tab === "issues"}
+                                <section class="card">
+                                        <div class="card-head"><h2>🐛 Проблемы расписания</h2></div>
+                                        <div class="issues-summary">
+                                                <div class="issue-stat"><span class="issue-num">{report.unplaced.length}</span><span class="issue-label">уроков не размещено</span></div>
+                                                <div class="issue-stat"><span class="issue-num">{report.conflicts.length}</span><span class="issue-label">накладок (учитель/класс/кабинет)</span></div>
+                                                <div class="issue-stat"><span class="issue-num">{report.violations.length}</span><span class="issue-label">нарушений жёстких ограничений</span></div>
+                                                <div class="issue-stat"><span class="issue-num">{report.placedPct}%</span><span class="issue-label">заполнено сетки</span></div>
+                                        </div>
+
+                                        {#if report.unplaced.length > 0}
+                                        <div class="issues-section">
+                                                <h3>❌ Не размещённые уроки ({report.unplaced.length})</h3>
+                                                <p class="hint">Эти уроки из учебного плана не попали ни в одну ячейку расписания. Чаще всего причина — нет свободных слотов у учителя или класса, или жёсткие ограничения блокируют все варианты.</p>
+                                                <table class="data">
+                                                        <thead><tr><th>Предмет</th><th>Класс</th><th>Учитель</th><th>Часов в неделю</th><th>Причина</th></tr></thead>
+                                                        <tbody>
+                                                                {#each report.unplaced as u}
+                                                                        <tr class="issue-row">
+                                                                        <td>{subjName(subjects, u.subject_id)}</td>
+                                                                        <td>{className(classes, u.class_id)}</td>
+                                                                        <td>{teachName(teachers, u.teacher_id)}</td>
+                                                                        <td>{u.hours_per_week}</td>
+                                                                        <td class="issue-reason">{u.reason}</td>
+                                                                        </tr>
+                                                                {/each}
+                                                        </tbody>
+                                                </table>
+                                        </div>
+                                        {:else}
+                                        <div class="issues-section empty-state">
+                                                <h3>✅ Все уроки размещены</h3>
+                                                <p class="hint">В расписании нет нераспределённых уроков.</p>
+                                        </div>
+                                        {/if}
+
+                                        {#if report.conflicts.length > 0}
+                                        <div class="issues-section">
+                                                <h3>⚠️ Накладки ({report.conflicts.length})</h3>
+                                                <p class="hint">Одна и та же сущность (учитель, класс или кабинет) стоит в двух местах одновременно.</p>
+                                                <table class="data">
+                                                        <thead><tr><th>День</th><th>Пара</th><th>Тип</th><th>Участники</th></tr></thead>
+                                                        <tbody>
+                                                                {#each report.conflicts as c}
+                                                                        <tr>
+                                                                        <td>{dayName(c.day)}</td>
+                                                                        <td>П{c.slot + 1}</td>
+                                                                        <td>{c.type}</td>
+                                                                        <td>{#each c.items as it, i}{it.subject} ({it.who}){#if i < c.items.length - 1}, {/if}{/each}</td>
+                                                                        </tr>
+                                                                {/each}
+                                                        </tbody>
+                                                </table>
+                                        </div>
+                                        {/if}
+
+                                        {#if report.violations.length > 0}
+                                        <div class="issues-section">
+                                                <h3>🚫 Нарушения жёстких ограничений ({report.violations.length})</h3>
+                                                <p class="hint">Урок стоит в ячейке, которая запрещена ограничением (учитель занят, класс занят, кабинет занят).</p>
+                                                <table class="data">
+                                                        <thead><tr><th>День</th><th>Пара</th><th>Что нарушено</th></tr></thead>
+                                                        <tbody>
+                                                                {#each report.violations as v}
+                                                                        <tr>
+                                                                        <td>{dayName(v.day)}</td>
+                                                                        <td>П{v.slot + 1}</td>
+                                                                        <td>{v.what}</td>
+                                                                        </tr>
+                                                                {/each}
+                                                        </tbody>
+                                                </table>
+                                        </div>
+                                        {/if}
+
+                                        {#if report.classStats.length > 0}
+                                        <div class="issues-section">
+                                                <h3>📊 По классам</h3>
+                                                <table class="data">
+                                                        <thead><tr><th>Класс</th><th>Размещено ч</th><th>Нужно ч</th><th>Не хватает</th><th>Статус</th></tr></thead>
+                                                        <tbody>
+                                                                {#each report.classStats as cs}
+                                                                        <tr class:bad={cs.missing > 0}>
+                                                                        <td>{cs.name}</td>
+                                                                        <td>{cs.placed}</td>
+                                                                        <td>{cs.need}</td>
+                                                                        <td class:bad={cs.missing > 0}>{cs.missing > 0 ? `-${cs.missing}` : "—"}</td>
+                                                                        <td>{cs.missing > 0 ? "не полностью" : "полностью"}</td>
+                                                                        </tr>
+                                                                {/each}
+                                                        </tbody>
+                                                </table>
+                                        </div>
+                                        {/if}
+
+                                        {#if report.teacherStats.length > 0}
+                                        <div class="issues-section">
+                                                <h3>👨‍🏫 По учителям (нагрузка)</h3>
+                                                <p class="hint">Сколько часов из учебного плана размещено у каждого учителя. Нет лимита — только фактическая нагрузка.</p>
+                                                <table class="data">
+                                                        <thead><tr><th>Учитель</th><th>Размещено ч</th></tr></thead>
+                                                        <tbody>
+                                                                {#each report.teacherStats as ts}
+                                                                        <tr>
+                                                                        <td>{ts.name}</td>
+                                                                        <td>{ts.placed} ч</td>
+                                                                        </tr>
+                                                                {/each}
+                                                        </tbody>
+                                                </table>
+                                        </div>
+                                        {/if}
+
+                                        <div class="issues-actions">
+                                                <button class="primary" on:click={generate}>🔄 Перегенерировать расписание</button>
+                                                <button on:click={() => tab = "schedule"}>↩ К расписанию</button>
+                                        </div>
                                 </section>
                         {/if}
                 </main>
@@ -1951,7 +2102,6 @@
         .list .li-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .list input.edit { flex: 1; min-width: 0; padding: 3px 6px; font-size: 12px; }
         .list input.edit.w-s { flex: 0 0 64px; }
-        .list input.edit.w-xs { flex: 0 0 56px; }
         .ghost-ico { background: transparent; border: none; color: #64748b; cursor: pointer; font-size: 12px; padding: 2px 4px; }
         .ghost-ico:hover { color: #4f46e5; }
         .field-label { font-size: 11px; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -2143,4 +2293,13 @@
         .mini .mini-title:hover { text-decoration: underline; }
         .mini th.d, .mini td.day { width: 34px; }
         .overview { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; align-items: start; }
+
+        /* Страница «Проблемы» */
+
+        /* Прогресс-бар генерации */
+        .gen-progress { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+        .prog-label { font-size: 13px; color: #64748b; min-width: 150px; }
+        .prog-bar { flex: 1; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; }
+        .prog-fill { height: 100%; background: #4f46e5; transition: width 0.3s ease; }
+        .prog-pct { font-size: 13px; font-weight: 700; color: #4f46e5; min-width: 35px; }
 </style>
