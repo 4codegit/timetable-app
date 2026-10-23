@@ -15,7 +15,7 @@
         let activeSchoolID = 0;
         let newSchoolName = "Моя школа";
         let tab = "refs";
-        const APP_VERSION = "1.11.1";
+        const APP_VERSION = "1.11.3";
         let msg = "";
 
         let teachers = [], subjects = [], classes = [], rooms = [], lessons = [], constraints = [], schedule = [];

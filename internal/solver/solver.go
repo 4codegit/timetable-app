@@ -122,7 +122,15 @@ func Solve(ctx context.Context, in SolveInput, parallelism int, timeout time.Dur
 
 	start := time.Now()
 
-	workerCtx, cancel := context.WithTimeout(ctx, timeout)
+	var workerCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		workerCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		// timeout == 0 — без лимита. WithTimeout(0) создал бы уже истёкший
+		// контекст и solver не получил бы ни миллисекунды на работу.
+		workerCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	var wg sync.WaitGroup
