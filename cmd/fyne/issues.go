@@ -31,13 +31,11 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 	refreshBtn := widget.NewButton("Анализировать", func() {})
 
-	// Stats
 	unplacedLabel := widget.NewLabel("Не размещено уроков: 0")
 	conflictsLabel := widget.NewLabel("Накладок: 0")
 	violationsLabel := widget.NewLabel("Нарушений ограничений: 0")
 	placedLabel := widget.NewLabel("Размещено: 0 / 0")
 
-	// Lists declared outside refresh so they persist
 	unplacedList := binding.NewStringList()
 	unplacedView := widget.NewListWithData(
 		unplacedList,
@@ -87,9 +85,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		classes, _ := store.ListClasses(activeSchoolID)
 		subjects, _ := store.ListSubjects(activeSchoolID)
 		teachers, _ := store.ListTeachers(activeSchoolID)
-		rooms, _ := store.ListRooms(activeSchoolID)
-
-		_ = rooms
 
 		subjName := func(id int) string {
 			for _, s := range subjects {
@@ -119,7 +114,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return "?"
 		}
 
-		// Compute total planned hours
 		totalPlanned := 0
 		for _, l := range lessons {
 			totalPlanned += l.HoursPerWeek
@@ -134,7 +128,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		placedLabel.SetText(fmt.Sprintf("Размещено: %d / %d", placed, totalPlanned))
 		unplacedLabel.SetText(fmt.Sprintf("Не размещено уроков: %d", unplaced))
 
-		// Conflicts: same teacher/class/room at same day+slot
 		type cellKey struct{ v, day, slot int }
 		busyT := map[cellKey][]int{}
 		busyC := map[cellKey][]int{}
@@ -171,7 +164,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 		conflictsLabel.SetText(fmt.Sprintf("Накладок: %d", len(conflictIDs)))
 
-		// Build unplaced list
 		unplacedList.Set([]string{})
 		lessonPlaced := map[int]int{}
 		for _, e := range entries {
@@ -185,7 +177,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			}
 		}
 
-		// Build conflicts list
 		conflictsList.Set([]string{})
 		entryMap := map[int]domain.ScheduleEntry{}
 		for _, e := range entries {
@@ -199,7 +190,7 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				teachName(e.TeacherID), subjName(e.SubjectID)))
 		}
 
-		violationsLabel.SetText(fmt.Sprintf("Нарушений ограничений: %d", 0)) // TODO: compute from constraints
+		violationsLabel.SetText(fmt.Sprintf("Нарушений ограничений: %d", 0))
 	}
 
 	refreshBtn.OnTapped = refresh

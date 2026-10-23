@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 
 	"fyne.io/fyne/v2"
@@ -103,7 +102,7 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				return
 			}
 			defer reader.Close()
-			data, err := io.ReadAll(reader)
+			data, err := os.ReadFile(reader.URI().Path())
 			if err != nil {
 				showError(w, "Ошибка чтения: "+err.Error())
 				return
