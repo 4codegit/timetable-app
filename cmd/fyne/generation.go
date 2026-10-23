@@ -82,19 +82,15 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 		go runGeneration(store, activeSchoolID, days, slots, timeoutSec, usePrecise.Checked,
 			func(placed, total int, status string) {
-				fyne.Do(func() {
-					if total > 0 {
-						progressBar.Max = float64(total)
-					}
-					progressBar.Value = float64(placed)
-					statusLabel.SetText(fmt.Sprintf("%s: %d/%d", status, placed, total))
-				})
+				if total > 0 {
+					progressBar.Max = float64(total)
+				}
+				progressBar.Value = float64(placed)
+				statusLabel.SetText(fmt.Sprintf("%s: %d/%d", status, placed, total))
 			},
 			func() {
-				fyne.Do(func() {
-					generateBtn.Enable()
-					statusLabel.SetText("Готово")
-				})
+				generateBtn.Enable()
+				statusLabel.SetText("Готово")
 			},
 		)
 	}
@@ -207,7 +203,6 @@ func runGeneration(store *db.Store, schoolID, days, slots, timeoutSec int, usePr
 	}
 }
 
-// toTeacherMap builds a map[int]domain.Teacher from a slice.
 func toTeacherMap(ts []domain.Teacher) map[int]domain.Teacher {
 	m := make(map[int]domain.Teacher, len(ts))
 	for _, t := range ts {
@@ -216,7 +211,6 @@ func toTeacherMap(ts []domain.Teacher) map[int]domain.Teacher {
 	return m
 }
 
-// toClassMap builds a map[int]domain.SchoolClass from a slice.
 func toClassMap(cs []domain.SchoolClass) map[int]domain.SchoolClass {
 	m := make(map[int]domain.SchoolClass, len(cs))
 	for _, c := range cs {
@@ -225,7 +219,6 @@ func toClassMap(cs []domain.SchoolClass) map[int]domain.SchoolClass {
 	return m
 }
 
-// toSubjMap builds a map[int]domain.Subject from a slice.
 func toSubjMap(subs []domain.Subject) map[int]domain.Subject {
 	m := make(map[int]domain.Subject, len(subs))
 	for _, s := range subs {

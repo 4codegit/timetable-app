@@ -95,7 +95,7 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	shortEntry.SetPlaceHolder("Кратко")
 
 	refresh := func() {
-		listData.Clear()
+		listData.Set([]string{})
 		if activeSchoolID == 0 {
 			return
 		}
@@ -121,26 +121,26 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		refresh()
 	}
 
-	del := func() {
-		sel, _ := listData.Get()
-		if sel == "" || activeSchoolID == 0 {
-			return
-		}
-		teachers, err := store.ListTeachers(activeSchoolID)
-		if err != nil {
-			return
-		}
-		for _, t := range teachers {
-			if t.Name == sel {
-				if err := store.DeleteTeacher(t.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				break
+		del := func() {
+			sel, _ := listData.Get()
+			if len(sel) == 0 || activeSchoolID == 0 {
+				return
 			}
+			teachers, err := store.ListTeachers(activeSchoolID)
+			if err != nil {
+				return
+			}
+			for _, t := range teachers {
+				if len(sel) > 0 && t.Name == sel[0] {
+					if err := store.DeleteTeacher(t.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					break
+				}
+			}
+			refresh()
 		}
-		refresh()
-	}
 
 	refresh()
 
@@ -174,7 +174,7 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	shortEntry.SetPlaceHolder("Кратко")
 
 	refresh := func() {
-		listData.Clear()
+		listData.Set([]string{})
 		if activeSchoolID == 0 {
 			return
 		}
@@ -200,26 +200,26 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		refresh()
 	}
 
-	del := func() {
-		sel, _ := listData.Get()
-		if sel == "" || activeSchoolID == 0 {
-			return
-		}
-		subs, err := store.ListSubjects(activeSchoolID)
-		if err != nil {
-			return
-		}
-		for _, s := range subs {
-			if s.Name == sel {
-				if err := store.DeleteSubject(s.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				break
+		del := func() {
+			sel, _ := listData.Get()
+			if len(sel) == 0 || activeSchoolID == 0 {
+				return
 			}
+			subs, err := store.ListSubjects(activeSchoolID)
+			if err != nil {
+				return
+			}
+			for _, s := range subs {
+				if len(sel) > 0 && s.Name == sel[0] {
+					if err := store.DeleteSubject(s.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					break
+				}
+			}
+			refresh()
 		}
-		refresh()
-	}
 
 	refresh()
 
@@ -251,7 +251,7 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	nameEntry.SetPlaceHolder("Название класса (например, 10А)")
 
 	refresh := func() {
-		listData.Clear()
+		listData.Set([]string{})
 		if activeSchoolID == 0 {
 			return
 		}
@@ -280,30 +280,30 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		refresh()
 	}
 
-	del := func() {
-		sel, _ := listData.Get()
-		if sel == "" || activeSchoolID == 0 {
-			return
-		}
-		classes, err := store.ListClasses(activeSchoolID)
-		if err != nil {
-			return
-		}
-		for _, c := range classes {
-			label := c.Name
-			if c.SubgroupOf != nil {
-				label += " (подгруппа)"
+		del := func() {
+			sel, _ := listData.Get()
+			if len(sel) == 0 || activeSchoolID == 0 {
+				return
 			}
-			if label == sel {
-				if err := store.DeleteClass(c.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
+			classes, err := store.ListClasses(activeSchoolID)
+			if err != nil {
+				return
+			}
+			for _, c := range classes {
+				label := c.Name
+				if c.SubgroupOf != nil {
+					label += " (подгруппа)"
 				}
-				break
+				if len(sel) > 0 && label == sel[0] {
+					if err := store.DeleteClass(c.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					break
+				}
 			}
+			refresh()
 		}
-		refresh()
-	}
 
 	refresh()
 
@@ -335,7 +335,7 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	nameEntry.SetPlaceHolder("Название кабинета")
 
 	refresh := func() {
-		listData.Clear()
+		listData.Set([]string{})
 		if activeSchoolID == 0 {
 			return
 		}
@@ -360,26 +360,26 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		refresh()
 	}
 
-	del := func() {
-		sel, _ := listData.Get()
-		if sel == "" || activeSchoolID == 0 {
-			return
-		}
-		rooms, err := store.ListRooms(activeSchoolID)
-		if err != nil {
-			return
-		}
-		for _, r := range rooms {
-			if r.Name == sel {
-				if err := store.DeleteRoom(r.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				break
+		del := func() {
+			sel, _ := listData.Get()
+			if len(sel) == 0 || activeSchoolID == 0 {
+				return
 			}
+			rooms, err := store.ListRooms(activeSchoolID)
+			if err != nil {
+				return
+			}
+			for _, r := range rooms {
+				if len(sel) > 0 && r.Name == sel[0] {
+					if err := store.DeleteRoom(r.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					break
+				}
+			}
+			refresh()
 		}
-		refresh()
-	}
 
 	refresh()
 
@@ -474,7 +474,7 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	)
 
 	refresh := func() {
-		listData.Clear()
+		listData.Set([]string{})
 		if activeSchoolID == 0 {
 			return
 		}
@@ -498,7 +498,7 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		if hours > 20 {
 			hours = 20
 		}
-		var classID, subjectID, teacherID, roomID int
+		var classID, subjectID, teacherID int
 		for _, c := range classes {
 			if c.Name == classSelect.Selected {
 				classID = c.ID
@@ -519,18 +519,17 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		}
 		for _, r := range rooms {
 			if r.Name == roomSelect.Selected {
-				roomID = r.ID
+				_ = r.ID
 				break
 			}
 		}
-		if _, err := store.CreateLesson(domain.Lesson{
-			SchoolID:     activeSchoolID,
-			ClassID:      classID,
-			SubjectID:    subjectID,
-			TeacherID:    teacherID,
-			RoomID:       roomID,
-			HoursPerWeek: hours,
-		}); err != nil {
+			if _, err := store.CreateLesson(domain.Lesson{
+				SchoolID:     activeSchoolID,
+				ClassID:      classID,
+				SubjectID:    subjectID,
+				TeacherID:    teacherID,
+				HoursPerWeek: hours,
+			}); err != nil {
 			showError(w, "Ошибка: "+err.Error())
 			return
 		}
@@ -538,27 +537,27 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		refresh()
 	}
 
-	del := func() {
-		sel, _ := listData.Get()
-		if sel == "" || activeSchoolID == 0 {
-			return
-		}
-		lessons, err := store.ListLessons(activeSchoolID)
-		if err != nil {
-			return
-		}
-		for _, l := range lessons {
-			label := fmt.Sprintf("ID %d: %d ч/нед", l.ID, l.HoursPerWeek)
-			if label == sel {
-				if err := store.DeleteLesson(l.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				break
+		del := func() {
+			sel, _ := listData.Get()
+			if len(sel) == 0 || activeSchoolID == 0 {
+				return
 			}
+			lessons, err := store.ListLessons(activeSchoolID)
+			if err != nil {
+				return
+			}
+			for _, l := range lessons {
+				label := fmt.Sprintf("ID %d: %d ч/нед", l.ID, l.HoursPerWeek)
+				if len(sel) > 0 && label == sel[0] {
+					if err := store.DeleteLesson(l.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					break
+				}
+			}
+			refresh()
 		}
-		refresh()
-	}
 
 	refresh()
 

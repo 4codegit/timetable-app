@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 
 	"fyne.io/fyne/v2"
@@ -10,7 +11,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
-	"timetable/internal/io"
+	timetableio "timetable/internal/io"
 	"timetable/internal/pdf"
 )
 
@@ -58,11 +59,12 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 
-		saveDialog := dialog.NewFileSave(func(uri fyne.URI, err error) {
-			if err != nil || uri == nil {
+		saveDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil || writer == nil {
 				return
 			}
-			if err := os.WriteFile(uri.Path(), pdfBytes, 0644); err != nil {
+			defer writer.Close()
+			if err := os.WriteFile(writer.URI().Path(), pdfBytes, 0644); err != nil {
 				showError(w, "Ошибка записи: "+err.Error())
 			}
 		}, w)
@@ -71,7 +73,7 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	})
 
 	exportJSONBtn := widget.NewButton("Экспорт JSON (резервная копия)", func() {
-		snap, err := io.ExportAll(store, activeSchoolID)
+		snap, err := timetableio.ExportAll(store, activeSchoolID)
 		if err != nil {
 			showError(w, "Ошибка экспорта: "+err.Error())
 			return
@@ -82,11 +84,12 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 
-		saveDialog := dialog.NewFileSave(func(uri fyne.URI, err error) {
-			if err != nil || uri == nil {
+		saveDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil || writer == nil {
 				return
 			}
-			if err := os.WriteFile(uri.Path(), data, 0644); err != nil {
+			defer writer.Close()
+			if err := os.WriteFile(writer.URI().Path(), data, 0644); err != nil {
 				showError(w, "Ошибка записи: "+err.Error())
 			}
 		}, w)
@@ -95,21 +98,22 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	})
 
 	importJSONBtn := widget.NewButton("Импорт JSON", func() {
-		fileDialog := dialog.NewFileOpen(func(uri fyne.URI, err error) {
-			if err != nil || uri == nil {
+		fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
 				return
 			}
-			data, err := os.ReadFile(uri.Path())
+			defer reader.Close()
+			data, err := io.ReadAll(reader)
 			if err != nil {
 				showError(w, "Ошибка чтения: "+err.Error())
 				return
 			}
-			snap, err := io.ParseSnapshot(data)
+			snap, err := timetableio.ParseSnapshot(data)
 			if err != nil {
 				showError(w, "Ошибка разбора JSON: "+err.Error())
 				return
 			}
-			if _, err := io.ImportAll(store, snap); err != nil {
+			if _, err := timetableio.ImportAll(store, snap); err != nil {
 				showError(w, "Ошибка импорта: "+err.Error())
 				return
 			}
@@ -160,6 +164,12 @@ func renderPDF(store *db.Store, schoolID int, opts pdf.Options) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	_ = ts
+	_ = cs
+	_ = rs
+	_ = subs
+	_ = entries
 
 	opts.SchoolName = sc.Name
 	if opts.Title == "" {

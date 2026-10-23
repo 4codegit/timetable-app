@@ -43,7 +43,7 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	)
 
 	refresh := func() {
-		listData.Clear()
+		listData.Set([]string{})
 		days, _ := strconv.Atoi(daysEntry.Text)
 		if days < 1 || days > 7 {
 			days = 6
@@ -59,7 +59,6 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 
-		// Build lookup: class -> day -> slot -> entries
 		type cellKey struct{ day, slot int }
 		grid := map[int]map[cellKey][]domain.ScheduleEntry{}
 		for _, e := range entries {
@@ -70,7 +69,6 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			grid[e.ClassID][k] = append(grid[e.ClassID][k], e)
 		}
 
-		// Load classes, subjects, teachers, rooms for labels
 		classes, _ := store.ListClasses(activeSchoolID)
 		subjects, _ := store.ListSubjects(activeSchoolID)
 		teachers, _ := store.ListTeachers(activeSchoolID)
@@ -116,7 +114,7 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 		for _, c := range classes {
 			if c.SubgroupOf != nil {
-				continue // subgroups shown inside parent
+				continue
 			}
 			for d := 0; d < days; d++ {
 				for s := 0; s < slots; s++ {

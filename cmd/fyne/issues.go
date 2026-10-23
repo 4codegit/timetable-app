@@ -37,6 +37,7 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	violationsLabel := widget.NewLabel("Нарушений ограничений: 0")
 	placedLabel := widget.NewLabel("Размещено: 0 / 0")
 
+	// Lists declared outside refresh so they persist
 	unplacedList := binding.NewStringList()
 	unplacedView := widget.NewListWithData(
 		unplacedList,
@@ -88,6 +89,8 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		teachers, _ := store.ListTeachers(activeSchoolID)
 		rooms, _ := store.ListRooms(activeSchoolID)
 
+		_ = rooms
+
 		subjName := func(id int) string {
 			for _, s := range subjects {
 				if s.ID == id {
@@ -111,14 +114,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			for _, c := range classes {
 				if c.ID == id {
 					return c.Name
-				}
-			}
-			return "?"
-		}
-		roomName := func(id int) string {
-			for _, r := range rooms {
-				if r.ID == id {
-					return r.Name
 				}
 			}
 			return "?"
@@ -177,7 +172,7 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		conflictsLabel.SetText(fmt.Sprintf("Накладок: %d", len(conflictIDs)))
 
 		// Build unplaced list
-		unplacedList.Clear()
+		unplacedList.Set([]string{})
 		lessonPlaced := map[int]int{}
 		for _, e := range entries {
 			lessonPlaced[e.LessonID]++
@@ -191,7 +186,7 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		}
 
 		// Build conflicts list
-		conflictsList.Clear()
+		conflictsList.Set([]string{})
 		entryMap := map[int]domain.ScheduleEntry{}
 		for _, e := range entries {
 			entryMap[e.ID] = e

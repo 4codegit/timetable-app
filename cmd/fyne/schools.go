@@ -22,7 +22,6 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			name, _ := i.(binding.String).Get()
 			btn.SetText(name)
 			btn.OnTapped = func() {
-				// Выбор школы — используется в других.view через activeSchoolID
 				setActiveSchoolByName(store, name)
 			}
 		},
@@ -46,7 +45,7 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 	delBtn := widget.NewButton("Удалить выбранную", func() {
 		sel, _ := schoolList.Get()
-		if sel == "" {
+		if len(sel) == 0 {
 			return
 		}
 		schools, err := store.ListSchools()
@@ -54,7 +53,7 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 		for _, sc := range schools {
-			if sc.Name == sel {
+			if sc.Name == sel[0] {
 				if err := store.DeleteSchool(sc.ID); err != nil {
 					showError(w, "Ошибка: "+err.Error())
 					return
@@ -81,7 +80,7 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 }
 
 func refreshSchools(store *db.Store, list binding.StringList) {
-	list.Clear()
+	list.Set([]string{})
 	schools, err := store.ListSchools()
 	if err != nil {
 		return
@@ -105,7 +104,6 @@ func setActiveSchoolByName(store *db.Store, name string) {
 }
 
 func showError(w fyne.Window, msg string) {
-	w := w
 	dlg := widget.NewPopUp(widget.NewLabel(msg), w.Canvas())
 	dlg.Show()
 }

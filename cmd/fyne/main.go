@@ -27,7 +27,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("db init failed: %v", err)
 	}
-	defer store.Close()
 
 	title := widget.NewLabel(appName + " v" + appVersion)
 	title.TextStyle.Bold = true
