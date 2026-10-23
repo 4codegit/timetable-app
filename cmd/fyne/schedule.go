@@ -22,12 +22,12 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		)
 	}
 
-	daysEntry := widget.NewEntry()
-	daysEntry.SetPlaceHolder("Дней")
-	daysEntry.SetText("6")
-	slotsEntry := widget.NewEntry()
-	slotsEntry.SetPlaceHolder("Слотов")
-	slotsEntry.SetText("8")
+	daysEd := widget.NewEntry()
+	daysEd.SetPlaceHolder("Дней")
+	daysEd.SetText("6")
+	slotsEd := widget.NewEntry()
+	slotsEd.SetPlaceHolder("Слотов")
+	slotsEd.SetText("8")
 
 	refreshBtn := widget.NewButton("Обновить", func() {})
 	listData := binding.NewStringList()
@@ -44,11 +44,11 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 	refresh := func() {
 		listData.Set([]string{})
-		days, _ := strconv.Atoi(daysEntry.Text)
+		days, _ := strconv.Atoi(daysEd.Text)
 		if days < 1 || days > 7 {
 			days = 6
 		}
-		slots, _ := strconv.Atoi(slotsEntry.Text)
+		slots, _ := strconv.Atoi(slotsEd.Text)
 		if slots < 1 || slots > 14 {
 			slots = 8
 		}
@@ -140,7 +140,7 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	return container.NewVBox(
 		widget.NewLabel("Расписание"),
 		widget.NewSeparator(),
-		container.NewHBox(daysEntry, slotsEntry, refreshBtn),
+		container.NewHBox(daysEd, slotsEd, refreshBtn),
 		widget.NewSeparator(),
 		container.NewScroll(list),
 	)

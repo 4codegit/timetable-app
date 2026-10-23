@@ -3,107 +3,86 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
+	"timetable/internal/domain"
 )
 
 func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
-	schoolList := binding.NewStringList()
-
-	list := widget.NewListWithData(
-		schoolList,
-		func() fyne.CanvasObject {
-			return widget.NewButton("", func() {})
-		},
-		func(i binding.DataItem, obj fyne.CanvasObject) {
-			btn := obj.(*widget.Button)
-			name, _ := i.(binding.String).Get()
-			btn.SetText(name)
-			btn.OnTapped = func() {
-				setActiveSchoolByName(store, name)
-			}
-		},
-	)
-
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder("Название школы")
 
-	addBtn := widget.NewButton("Добавить школу", func() {
-		name := nameEntry.Text
-		if name == "" {
-			return
-		}
-		if _, err := store.CreateSchool(name); err != nil {
-			showError(w, "Ошибка: "+err.Error())
-			return
-		}
-		nameEntry.SetText("")
-		refreshSchools(store, schoolList)
-	})
+	var list *widget.List
+	list = widget.NewList(
+		func() int {
+			schools, _ := store.ListSchools()
+			return len(schools)
+		},
+		func() fyne.CanvasObject {
+			nameEd := widget.NewEntry()
+			btnSave := widget.NewButton("💾", nil)
+			btnDel := widget.NewButton("✕", nil)
+			return container.NewHBox(nameEd, btnSave, btnDel)
+		},
+		func(i widget.ListItemID, obj fyne.CanvasObject) {
+			schools, err := store.ListSchools()
+			if err != nil || i >= len(schools) {
+				return
+			}
+			sc := schools[i]
+			box := obj.(*fyne.Container)
+			nameEd := box.Objects[0].(*widget.Entry)
+			nameEd.SetText(sc.Name)
+			nameEd.Disable()
 
-	delBtn := widget.NewButton("Удалить выбранную", func() {
-		sel, _ := schoolList.Get()
-		if len(sel) == 0 {
-			return
-		}
-		schools, err := store.ListSchools()
-		if err != nil {
-			return
-		}
-		for _, sc := range schools {
-			if sc.Name == sel[0] {
+			btnSave := box.Objects[1].(*widget.Button)
+			btnSave.OnTapped = func() {
+				nameEd.Enable()
+				btnSave.SetText("💾")
+				btnSave.OnTapped = func() {
+					if err := store.UpdateSchool(domain.School{ID: sc.ID, Name: nameEd.Text}); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					nameEd.Disable()
+					btnSave.SetText("✎")
+					btnSave.OnTapped = func() {
+						nameEd.Enable()
+						btnSave.SetText("💾")
+					}
+				}
+			}
+
+			btnDel := box.Objects[2].(*widget.Button)
+			btnDel.OnTapped = func() {
 				if err := store.DeleteSchool(sc.ID); err != nil {
 					showError(w, "Ошибка: "+err.Error())
 					return
 				}
-				break
+				list.Refresh()
 			}
+		},
+	)
+
+	addBtn := widget.NewButton("Добавить школу", func() {
+		if nameEntry.Text == "" {
+			showError(w, "Введите название школы")
+			return
 		}
-		refreshSchools(store, schoolList)
+		if _, err := store.CreateSchool(nameEntry.Text); err != nil {
+			showError(w, "Ошибка: "+err.Error())
+			return
+		}
+		nameEntry.SetText("")
+		list.Refresh()
 	})
-
-	refreshBtn := widget.NewButton("Обновить", func() {
-		refreshSchools(store, schoolList)
-	})
-
-	refreshSchools(store, schoolList)
 
 	return container.NewVBox(
 		widget.NewLabel("Школы"),
 		widget.NewSeparator(),
-		container.NewHBox(nameEntry, addBtn, delBtn, refreshBtn),
+		container.NewHBox(nameEntry, addBtn),
 		widget.NewSeparator(),
 		container.NewScroll(list),
 	)
-}
-
-func refreshSchools(store *db.Store, list binding.StringList) {
-	list.Set([]string{})
-	schools, err := store.ListSchools()
-	if err != nil {
-		return
-	}
-	for _, sc := range schools {
-		list.Append(sc.Name)
-	}
-}
-
-func setActiveSchoolByName(store *db.Store, name string) {
-	schools, err := store.ListSchools()
-	if err != nil {
-		return
-	}
-	for _, sc := range schools {
-		if sc.Name == name {
-			setActiveSchoolID(sc.ID)
-			return
-		}
-	}
-}
-
-func showError(w fyne.Window, msg string) {
-	dlg := widget.NewPopUp(widget.NewLabel(msg), w.Canvas())
-	dlg.Show()
 }

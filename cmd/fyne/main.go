@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -17,23 +18,32 @@ const (
 	appName    = "Timetable"
 )
 
+type UI struct {
+	store    *db.Store
+	win      fyne.Window
+	sidebar  *fyne.Container
+	content  *fyne.Container
+	topBar   *fyne.Container
+	root     *fyne.Container
+	schoolID int
+}
+
 func main() {
 	a := app.New()
+	a.Settings().SetTheme(theme.DarkTheme())
+
 	w := a.NewWindow(appName + " v" + appVersion)
 	w.Resize(fyne.NewSize(1400, 900))
 	w.CenterOnScreen()
-
-	// Кастомная тема: тёмная, приятная для глаз
-	a.Settings().SetTheme(theme.DarkTheme())
+	w.SetPadded(false)
 
 	store, err := db.New(defaultDBPath())
 	if err != nil {
 		log.Fatalf("db init failed: %v", err)
 	}
 
-	ui := NewUI(store, w, a)
-	ui.Show()
-
+	ui := NewUI(store, w)
+	w.SetContent(ui.Root())
 	w.ShowAndRun()
 }
 
@@ -57,50 +67,59 @@ func joinPath(elem ...string) string {
 	return result
 }
 
-// UI содержит все состояния приложения.
-type UI struct {
-	store      *db.Store
-	window     fyne.Window
-	app        fyne.App
-	activeTab  string
-	activeView fyne.CanvasObject
-	content    *fyne.Container
-	schoolID   int
-}
-
-func NewUI(store *db.Store, w fyne.Window, a fyne.App) *UI {
+func NewUI(store *db.Store, w fyne.Window) *UI {
 	ui := &UI{
-		store:  store,
-		window: w,
-		app:    a,
+		store:    store,
+		win:      w,
+		schoolID: 0,
 	}
 
-	// Верхняя панель: версия + выбор школы + навигация
-	topBar := container.NewBorder(
+	versionLbl := widget.NewLabel(appName + " v" + appVersion)
+	versionLbl.TextStyle.Bold = true
+
+	schoolSelect := widget.NewSelect([]string{}, func(s string) {
+		schools, err := store.ListSchools()
+		if err != nil {
+			return
+		}
+		for _, sc := range schools {
+			if sc.Name == s {
+				ui.schoolID = sc.ID
+				break
+			}
+		}
+	})
+
+	ui.topBar = container.NewBorder(
 		nil, nil,
-		widget.NewLabel(appName+" v"+appVersion),
 		container.NewHBox(
+			versionLbl,
+			layout.NewSpacer(),
 			widget.NewLabel("Школа:"),
-			widget.NewSelect([]string{}, func(s string) {}),
+			schoolSelect,
 		),
+		nil,
 	)
 
-	// Боковое меню
-	nav := container.NewVBox(
-		widget.NewButton("Школы", func() { ui.showSchools() }),
-		widget.NewButton("Справочники", func() { ui.showRefs() }),
-		widget.NewButton("Генерация", func() { ui.showGeneration() }),
-		widget.NewButton("Расписание", func() { ui.showSchedule() }),
-		widget.NewButton("Проблемы", func() { ui.showIssues() }),
-		widget.NewButton("Экспорт", func() { ui.showExport() }),
+	ui.sidebar = container.NewVBox(
+		widget.NewLabel("МЕНЮ"),
+		widget.NewSeparator(),
+		navBtn("Школы", func() { ui.showSchools() }),
+		navBtn("Справочники", func() { ui.showRefs() }),
+		navBtn("Генерация", func() { ui.showGeneration() }),
+		navBtn("Расписание", func() { ui.showSchedule() }),
+		navBtn("Проблемы", func() { ui.showIssues() }),
+		navBtn("Экспорт", func() { ui.showExport() }),
 	)
 
 	ui.content = container.NewVBox(ui.showWelcome())
 
-	mainSplit := container.NewHSplit(nav, ui.content)
-	mainSplit.Offset = 0.2
+	split := container.NewHSplit(ui.sidebar, ui.content)
+	split.Offset = 0.18
 
-	w.SetContent(container.NewVBox(topBar, mainSplit))
+	ui.root = container.NewVBox(ui.topBar, split)
+
+	refreshSchoolsSelect(store, schoolSelect)
 
 	ui.showWelcome()
 	return ui
@@ -111,26 +130,65 @@ func (ui *UI) SetContent(obj fyne.CanvasObject) {
 	ui.content.Refresh()
 }
 
+func (ui *UI) Root() fyne.CanvasObject {
+	return ui.root
+}
+
 func (ui *UI) Show() {}
+
+func navBtn(label string, onTap func()) *widget.Button {
+	b := widget.NewButton(label, onTap)
+	b.Importance = widget.LowImportance
+	return b
+}
+
+func refreshSchoolsSelect(store *db.Store, selectWidget *widget.Select) {
+	schools, err := store.ListSchools()
+	if err != nil {
+		return
+	}
+	var names []string
+	for _, sc := range schools {
+		names = append(names, sc.Name)
+	}
+	selectWidget.Options = names
+	if len(names) > 0 && selectWidget.Selected == "" {
+		selectWidget.Selected = names[0]
+		selectWidget.Refresh()
+		setActiveSchoolID(schools[0].ID)
+	}
+}
+
+func showError(w fyne.Window, msg string) {
+	dlg := widget.NewPopUp(widget.NewLabel(msg), w.Canvas())
+	dlg.Show()
+}
 
 func (ui *UI) showWelcome() fyne.CanvasObject {
 	return container.NewVBox(
 		widget.NewLabel("Добро пожаловать в "+appName+" v"+appVersion),
 		widget.NewLabel("Настольное приложение для составления школьного расписания"),
 		widget.NewSeparator(),
-		widget.NewLabel("Выберите раздел из меню слева:"),
-		widget.NewLabel("• Школы — создание и управление школами"),
-		widget.NewLabel("• Справочники — учителя, предметы, классы, кабинеты, уроки"),
-		widget.NewLabel("• Генерация — автоматическое построение расписания"),
-		widget.NewLabel("• Расписание — просмотр готовой сетки"),
-		widget.NewLabel("• Проблемы — отчёт о конфликтах и неразмещённых уроках"),
-		widget.NewLabel("• Экспорт — PDF, CSV, JSON резервная копия"),
+		container.NewGridWithColumns(3,
+			card("🏫", "Школы", "Создание и управление школами", func() { ui.showSchools() }),
+			card("📚", "Справочники", "Учителя, предметы, классы, кабинеты, уроки", func() { ui.showRefs() }),
+			card("⚙", "Генерация", "Автоматическое построение расписания", func() { ui.showGeneration() }),
+			card("🗓", "Расписание", "Просмотр готовой сетки уроков", func() { ui.showSchedule() }),
+			card("⚠", "Проблемы", "Конфликты, неразмещённые уроки", func() { ui.showIssues() }),
+			card("💾", "Экспорт", "PDF, CSV, JSON резервная копия", func() { ui.showExport() }),
+		),
 	)
 }
 
-func (ui *UI) showSchools()    { ui.SetContent(buildSchoolsView(ui.store, ui.window)) }
-func (ui *UI) showRefs()       { ui.SetContent(buildRefsView(ui.store, ui.window)) }
-func (ui *UI) showGeneration() { ui.SetContent(buildGenerationView(ui.store, ui.window)) }
-func (ui *UI) showSchedule()   { ui.SetContent(buildScheduleView(ui.store, ui.window)) }
-func (ui *UI) showIssues()     { ui.SetContent(buildIssuesView(ui.store, ui.window)) }
-func (ui *UI) showExport()     { ui.SetContent(buildExportView(ui.store, ui.window)) }
+func card(icon, title, desc string, onTap func()) *widget.Button {
+	b := widget.NewButton(icon+"  "+title+"\n"+desc, onTap)
+	b.Importance = widget.LowImportance
+	return b
+}
+
+func (ui *UI) showSchools()    { ui.SetContent(buildSchoolsView(ui.store, ui.win)) }
+func (ui *UI) showRefs()       { ui.SetContent(buildRefsView(ui.store, ui.win)) }
+func (ui *UI) showGeneration() { ui.SetContent(buildGenerationView(ui.store, ui.win)) }
+func (ui *UI) showSchedule()   { ui.SetContent(buildScheduleView(ui.store, ui.win)) }
+func (ui *UI) showIssues()     { ui.SetContent(buildIssuesView(ui.store, ui.win)) }
+func (ui *UI) showExport()     { ui.SetContent(buildExportView(ui.store, ui.win)) }

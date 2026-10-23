@@ -16,13 +16,13 @@ import (
 )
 
 func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
-	daysEntry := widget.NewEntry()
-	daysEntry.SetPlaceHolder("Дней (1-7)")
-	daysEntry.SetText("6")
+	daysEd := widget.NewEntry()
+	daysEd.SetPlaceHolder("Дней (1-7)")
+	daysEd.SetText("6")
 
-	slotsEntry := widget.NewEntry()
-	slotsEntry.SetPlaceHolder("Слотов в день (1-14)")
-	slotsEntry.SetText("8")
+	slotsEd := widget.NewEntry()
+	slotsEd.SetPlaceHolder("Слотов в день (1-14)")
+	slotsEd.SetText("8")
 
 	timeoutPreset := widget.NewSelect([]string{"none", "30", "90", "custom"}, func(string) {})
 	timeoutPreset.SetSelected("none")
@@ -55,11 +55,11 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 
-		days, _ := strconv.Atoi(daysEntry.Text)
+		days, _ := strconv.Atoi(daysEd.Text)
 		if days < 1 || days > 7 {
 			days = 6
 		}
-		slots, _ := strconv.Atoi(slotsEntry.Text)
+		slots, _ := strconv.Atoi(slotsEd.Text)
 		if slots < 1 || slots > 14 {
 			slots = 8
 		}
@@ -105,7 +105,7 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		widget.NewLabel("Генерация расписания"),
 		widget.NewSeparator(),
 		container.NewHBox(
-			daysEntry, slotsEntry,
+			daysEd, slotsEd,
 			widget.NewLabel("Таймаут CP-SAT:"), timeoutPreset, timeoutCustom,
 			usePrecise,
 		),

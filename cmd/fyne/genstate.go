@@ -2,7 +2,6 @@ package main
 
 import "sync"
 
-// GenProgress tracks live progress of an in-progress generation.
 type GenProgress struct {
 	ID      int64  `json:"id"`
 	Placed  int    `json:"placed"`
