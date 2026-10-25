@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -30,11 +31,19 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	slotsEd.SetText("8")
 
 	refreshBtn := widget.NewButton("Анализировать", func() {})
+	refreshBtn.Importance = widget.HighImportance
 
-	unplacedLabel := widget.NewLabel("Не размещено уроков: 0")
-	conflictsLabel := widget.NewLabel("Накладок: 0")
-	violationsLabel := widget.NewLabel("Нарушений ограничений: 0")
-	placedLabel := widget.NewLabel("Размещено: 0 / 0")
+	placedLabel := widget.NewLabel("0 / 0")
+	unplacedLabel := widget.NewLabel("0")
+	conflictsLabel := widget.NewLabel("0")
+	violationsLabel := widget.NewLabel("0")
+
+	statBox := container.NewGridWithColumns(4,
+		statCard("Размещено", placedLabel),
+		statCard("Не размещено", unplacedLabel),
+		statCard("Накладок", conflictsLabel),
+		statCard("Нарушений", violationsLabel),
+	)
 
 	unplacedList := binding.NewStringList()
 	unplacedView := widget.NewListWithData(
@@ -125,8 +134,8 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			unplaced = 0
 		}
 
-		placedLabel.SetText(fmt.Sprintf("Размещено: %d / %d", placed, totalPlanned))
-		unplacedLabel.SetText(fmt.Sprintf("Не размещено уроков: %d", unplaced))
+		placedLabel.SetText(fmt.Sprintf("%d / %d", placed, totalPlanned))
+		unplacedLabel.SetText(fmt.Sprintf("%d", unplaced))
 
 		type cellKey struct{ v, day, slot int }
 		busyT := map[cellKey][]int{}
@@ -162,7 +171,7 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			}
 		}
 
-		conflictsLabel.SetText(fmt.Sprintf("Накладок: %d", len(conflictIDs)))
+		conflictsLabel.SetText(fmt.Sprintf("%d", len(conflictIDs)))
 
 		unplacedList.Set([]string{})
 		lessonPlaced := map[int]int{}
@@ -190,34 +199,44 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				teachName(e.TeacherID), subjName(e.SubjectID)))
 		}
 
-		violationsLabel.SetText(fmt.Sprintf("Нарушений ограничений: %d", 0))
+		violationsLabel.SetText(fmt.Sprintf("%d", 0))
 	}
 
 	refreshBtn.OnTapped = refresh
 	refresh()
 
 	return container.NewVBox(
-		widget.NewLabel("Проблемы расписания"),
+		widget.NewLabelWithStyle("Проблемы расписания", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
-		container.NewHBox(daysEd, slotsEd, refreshBtn),
+		container.NewBorder(
+			nil, nil,
+			container.NewHBox(
+				container.NewVBox(daysEd, slotsEd),
+				refreshBtn,
+				layout.NewSpacer(),
+			),
+			nil,
+		),
+		widget.NewSeparator(),
+		statBox,
 		widget.NewSeparator(),
 		container.NewHBox(
-			container.NewVBox(
-				placedLabel,
-				unplacedLabel,
-				conflictsLabel,
-				violationsLabel,
-			),
-			widget.NewSeparator(),
 			container.NewVBox(
 				widget.NewLabel("Не размещённые уроки:"),
 				container.NewScroll(unplacedView),
 			),
+			widget.NewSeparator(),
+			container.NewVBox(
+				widget.NewLabel("Накладки:"),
+				container.NewScroll(conflictsView),
+			),
 		),
-		widget.NewSeparator(),
-		container.NewVBox(
-			widget.NewLabel("Накладки:"),
-			container.NewScroll(conflictsView),
-		),
+	)
+}
+
+func statCard(title string, lbl *widget.Label) fyne.CanvasObject {
+	return container.NewVBox(
+		widget.NewLabel(title),
+		lbl,
 	)
 }

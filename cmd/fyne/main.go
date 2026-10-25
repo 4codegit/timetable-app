@@ -142,23 +142,6 @@ func navBtn(label string, onTap func()) *widget.Button {
 	return b
 }
 
-func refreshSchoolsSelect(store *db.Store, selectWidget *widget.Select) {
-	schools, err := store.ListSchools()
-	if err != nil {
-		return
-	}
-	var names []string
-	for _, sc := range schools {
-		names = append(names, sc.Name)
-	}
-	selectWidget.Options = names
-	if len(names) > 0 && selectWidget.Selected == "" {
-		selectWidget.Selected = names[0]
-		selectWidget.Refresh()
-		setActiveSchoolID(schools[0].ID)
-	}
-}
-
 func showError(w fyne.Window, msg string) {
 	dlg := widget.NewPopUp(widget.NewLabel(msg), w.Canvas())
 	dlg.Show()

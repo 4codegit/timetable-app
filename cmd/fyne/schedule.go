@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -29,7 +30,9 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	slotsEd.SetPlaceHolder("Слотов")
 	slotsEd.SetText("8")
 
-	refreshBtn := widget.NewButton("Обновить", func() {})
+		refreshBtn := widget.NewButton("Обновить", func() {})
+		refreshBtn.Importance = widget.HighImportance
+
 	listData := binding.NewStringList()
 	list := widget.NewListWithData(
 		listData,
@@ -138,9 +141,17 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	refresh()
 
 	return container.NewVBox(
-		widget.NewLabel("Расписание"),
+		widget.NewLabelWithStyle("Расписание", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
-		container.NewHBox(daysEd, slotsEd, refreshBtn),
+		container.NewBorder(
+			nil, nil,
+			container.NewHBox(
+				container.NewVBox(daysEd, slotsEd),
+				refreshBtn,
+				layout.NewSpacer(),
+			),
+			nil,
+		),
 		widget.NewSeparator(),
 		container.NewScroll(list),
 	)

@@ -8,6 +8,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -40,7 +41,10 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	usePrecise := widget.NewCheck("Точный CP-SAT (OR-Tools)", func(bool) {})
 
 	generateBtn := widget.NewButton("Сгенерировать расписание", func() {})
+	generateBtn.Importance = widget.HighImportance
+
 	undoBtn := widget.NewButton("Отменить", func() {})
+	undoBtn.Importance = widget.LowImportance
 
 	progressBar := widget.NewProgressBar()
 	progressBar.Min = 0
@@ -102,18 +106,30 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	}
 
 	return container.NewVBox(
-		widget.NewLabel("Генерация расписания"),
+		widget.NewLabelWithStyle("Генерация расписания", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
-		container.NewHBox(
-			daysEd, slotsEd,
-			widget.NewLabel("Таймаут CP-SAT:"), timeoutPreset, timeoutCustom,
-			usePrecise,
+		container.NewBorder(
+			nil, nil,
+			container.NewHBox(
+				container.NewGridWithColumns(2,
+					container.NewVBox(daysEd, slotsEd),
+					container.NewVBox(
+						container.NewHBox(widget.NewLabel("Таймаут CP-SAT:"), timeoutPreset),
+						timeoutCustom,
+					),
+					usePrecise,
+				),
+				layout.NewSpacer(),
+				container.NewVBox(generateBtn, undoBtn),
+			),
+			nil,
 		),
-		container.NewHBox(generateBtn, undoBtn),
 		widget.NewSeparator(),
 		container.NewVBox(
-			progressBar,
-			statusLabel,
+			container.NewHBox(
+				progressBar,
+				statusLabel,
+			),
 		),
 	)
 }

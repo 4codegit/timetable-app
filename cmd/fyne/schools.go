@@ -3,6 +3,7 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -21,9 +22,14 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		},
 		func() fyne.CanvasObject {
 			nameEd := widget.NewEntry()
-			btnSave := widget.NewButton("💾", nil)
-			btnDel := widget.NewButton("✕", nil)
-			return container.NewHBox(nameEd, btnSave, btnDel)
+			btnSave := widget.NewButton("Сохранить", nil)
+			btnDel := widget.NewButton("Удалить", nil)
+			btnSave.Importance = widget.LowImportance
+			btnDel.Importance = widget.DangerImportance
+			return container.NewBorder(
+				nil, nil, nameEd, nil,
+				container.NewHBox(btnSave, btnDel),
+			)
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			schools, err := store.ListSchools()
@@ -39,17 +45,17 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			btnSave := box.Objects[1].(*widget.Button)
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
-				btnSave.SetText("💾")
+				btnSave.SetText("Сохранить")
 				btnSave.OnTapped = func() {
 					if err := store.UpdateSchool(domain.School{ID: sc.ID, Name: nameEd.Text}); err != nil {
 						showError(w, "Ошибка: "+err.Error())
 						return
 					}
 					nameEd.Disable()
-					btnSave.SetText("✎")
+					btnSave.SetText("Изменить")
 					btnSave.OnTapped = func() {
 						nameEd.Enable()
-						btnSave.SetText("💾")
+						btnSave.SetText("Сохранить")
 					}
 				}
 			}
@@ -77,11 +83,20 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		nameEntry.SetText("")
 		list.Refresh()
 	})
+		addBtn.Importance = widget.HighImportance
 
 	return container.NewVBox(
-		widget.NewLabel("Школы"),
+		widget.NewLabelWithStyle("Школы", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
-		container.NewHBox(nameEntry, addBtn),
+		container.NewBorder(
+			nil, nil,
+			container.NewHBox(
+				container.NewVBox(nameEntry),
+				addBtn,
+				layout.NewSpacer(),
+			),
+			nil,
+		),
 		widget.NewSeparator(),
 		container.NewScroll(list),
 	)

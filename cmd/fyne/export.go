@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -70,6 +71,7 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		saveDialog.SetFileName("timetable.pdf")
 		saveDialog.Show()
 	})
+	exportPDFBtn.Importance = widget.HighImportance
 
 	exportJSONBtn := widget.NewButton("Экспорт JSON (резервная копия)", func() {
 		snap, err := timetableio.ExportAll(store, activeSchoolID)
@@ -95,6 +97,7 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		saveDialog.SetFileName("timetable_backup.json")
 		saveDialog.Show()
 	})
+	exportJSONBtn.Importance = widget.HighImportance
 
 	importJSONBtn := widget.NewButton("Импорт JSON", func() {
 		fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
@@ -122,16 +125,45 @@ func buildExportView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	})
 
 	return container.NewVBox(
-		widget.NewLabel("Экспорт / Импорт"),
+		widget.NewLabelWithStyle("Экспорт / Импорт", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewSeparator(),
+		container.NewBorder(
+			nil, nil,
+			container.NewHBox(
+				container.NewVBox(
+					widget.NewLabel("Режим:"),
+					modeSelect,
+				),
+				container.NewVBox(
+					widget.NewLabel("Формат:"),
+					pageSizeSelect,
+				),
+				container.NewVBox(
+					widget.NewLabel("Ориентация:"),
+					orientationSelect,
+				),
+				layout.NewSpacer(),
+			),
+			nil,
+		),
 		widget.NewSeparator(),
 		container.NewHBox(
-			widget.NewLabel("Режим:"), modeSelect,
-			widget.NewLabel("Формат:"), pageSizeSelect,
-			widget.NewLabel("Ориентация:"), orientationSelect,
+			showTeacher,
+			showRoom,
+			weekdaysOnly,
+			bw,
 		),
-		container.NewHBox(showTeacher, showRoom, weekdaysOnly, bw),
 		widget.NewSeparator(),
-		container.NewHBox(exportPDFBtn, exportJSONBtn, importJSONBtn),
+		container.NewBorder(
+			nil, nil,
+			container.NewHBox(
+				exportPDFBtn,
+				exportJSONBtn,
+				importJSONBtn,
+				layout.NewSpacer(),
+			),
+			nil,
+		),
 		widget.NewSeparator(),
 		widget.NewLabel("Резервная копия сохраняет всю школу: настройки, подгруппы, ограничения и готовое расписание."),
 	)
