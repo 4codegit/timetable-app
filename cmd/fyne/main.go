@@ -102,7 +102,7 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 	)
 
 	ui.sidebar = container.NewVBox(
-		widget.NewLabel("МЕНЮ"),
+		widget.NewLabelWithStyle("МЕНЮ", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
 		navBtn("Школы", func() { ui.showSchools() }),
 		navBtn("Справочники", func() { ui.showRefs() }),
@@ -110,9 +110,9 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 		navBtn("Расписание", func() { ui.showSchedule() }),
 		navBtn("Проблемы", func() { ui.showIssues() }),
 		navBtn("Экспорт", func() { ui.showExport() }),
-	)
-
-	ui.content = container.NewVBox(ui.showWelcome())
+		)
+	
+		ui.content = container.NewVBox(ui.showWelcome())
 
 	split := container.NewHSplit(ui.sidebar, ui.content)
 	split.Offset = 0.18
@@ -149,7 +149,7 @@ func showError(w fyne.Window, msg string) {
 
 func (ui *UI) showWelcome() fyne.CanvasObject {
 	return container.NewVBox(
-		widget.NewLabel("Добро пожаловать в "+appName+" v"+appVersion),
+		widget.NewLabelWithStyle("Добро пожаловать в "+appName+" v"+appVersion, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewLabel("Настольное приложение для составления школьного расписания"),
 		widget.NewSeparator(),
 		container.NewGridWithColumns(3,

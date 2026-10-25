@@ -151,7 +151,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 		conflictsLabel.SetText(fmt.Sprintf("%d", len(conflictIDs)))
 
-		// Не размещённые уроки
 		unplacedItems := make([]fyne.CanvasObject, 0)
 		lessonPlaced := map[int]int{}
 		for _, e := range entries {
@@ -170,7 +169,6 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		unplacedListContainer.Objects = unplacedItems
 		unplacedListContainer.Refresh()
 
-		// Накладки
 		conflictsItems := make([]fyne.CanvasObject, 0)
 		entryMap := map[int]domain.ScheduleEntry{}
 		for _, e := range entries {
