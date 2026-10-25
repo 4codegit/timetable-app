@@ -7,7 +7,6 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -110,9 +109,9 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 		navBtn("Расписание", func() { ui.showSchedule() }),
 		navBtn("Проблемы", func() { ui.showIssues() }),
 		navBtn("Экспорт", func() { ui.showExport() }),
-		)
-	
-		ui.content = container.NewVBox(ui.showWelcome())
+	)
+
+	ui.content = container.NewVBox(ui.showWelcome())
 
 	split := container.NewHSplit(ui.sidebar, ui.content)
 	split.Offset = 0.18
