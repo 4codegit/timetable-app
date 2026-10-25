@@ -6,7 +6,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
@@ -30,23 +29,14 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	slotsEd.SetPlaceHolder("Слотов")
 	slotsEd.SetText("8")
 
-		refreshBtn := widget.NewButton("Обновить", func() {})
-		refreshBtn.Importance = widget.HighImportance
+	refreshBtn := widget.NewButton("Обновить", func() {})
+	refreshBtn.Importance = widget.HighImportance
 
-	listData := binding.NewStringList()
-	list := widget.NewListWithData(
-		listData,
-		func() fyne.CanvasObject { return widget.NewEntry() },
-		func(i binding.DataItem, obj fyne.CanvasObject) {
-			entry := obj.(*widget.Entry)
-			text, _ := i.(binding.String).Get()
-			entry.SetText(text)
-			entry.Disable()
-		},
-	)
+	var listContainer *fyne.Container
+	var refresh func()
 
-	refresh := func() {
-		listData.Set([]string{})
+	refresh = func() {
+		listContainer.Objects = nil
 		days, _ := strconv.Atoi(daysEd.Text)
 		if days < 1 || days > 7 {
 			days = 6
@@ -58,7 +48,9 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 		entries, err := store.ListSchedule(activeSchoolID)
 		if err != nil {
-			listData.Append("Ошибка загрузки: " + err.Error())
+			listContainer.Objects = append(listContainer.Objects, widget.NewEntry())
+			listContainer.Objects[len(listContainer.Objects)-1].(*widget.Entry).SetText("Ошибка загрузки: " + err.Error())
+			listContainer.Refresh()
 			return
 		}
 
@@ -130,14 +122,19 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 						label := fmt.Sprintf("%s %s П%d: %s (%s) %s",
 							className(c.ID), dayNames[d], s+1,
 							subjName(e.SubjectID), teachName(e.TeacherID), roomName(e.RoomID))
-						listData.Append(label)
+						entry := widget.NewEntry()
+						entry.SetText(label)
+						entry.Disable()
+						listContainer.Objects = append(listContainer.Objects, entry)
 					}
 				}
 			}
 		}
+		listContainer.Refresh()
 	}
 
 	refreshBtn.OnTapped = refresh
+	listContainer = container.NewVBox()
 	refresh()
 
 	return container.NewVBox(
@@ -153,6 +150,6 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			nil,
 		),
 		widget.NewSeparator(),
-		container.NewScroll(list),
+		container.NewScroll(listContainer),
 	)
 }

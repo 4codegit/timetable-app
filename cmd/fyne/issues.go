@@ -6,7 +6,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
@@ -45,29 +44,8 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		statCard("Нарушений", violationsLabel),
 	)
 
-	unplacedList := binding.NewStringList()
-	unplacedView := widget.NewListWithData(
-		unplacedList,
-		func() fyne.CanvasObject { return widget.NewEntry() },
-		func(i binding.DataItem, obj fyne.CanvasObject) {
-			entry := obj.(*widget.Entry)
-			text, _ := i.(binding.String).Get()
-			entry.SetText(text)
-			entry.Disable()
-		},
-	)
-
-	conflictsList := binding.NewStringList()
-	conflictsView := widget.NewListWithData(
-		conflictsList,
-		func() fyne.CanvasObject { return widget.NewEntry() },
-		func(i binding.DataItem, obj fyne.CanvasObject) {
-			entry := obj.(*widget.Entry)
-			text, _ := i.(binding.String).Get()
-			entry.SetText(text)
-			entry.Disable()
-		},
-	)
+	var unplacedListContainer *fyne.Container
+	var conflictsListContainer *fyne.Container
 
 	refresh := func() {
 		days, _ := strconv.Atoi(daysEd.Text)
@@ -173,7 +151,8 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 		conflictsLabel.SetText(fmt.Sprintf("%d", len(conflictIDs)))
 
-		unplacedList.Set([]string{})
+		// Не размещённые уроки
+		unplacedItems := make([]fyne.CanvasObject, 0)
 		lessonPlaced := map[int]int{}
 		for _, e := range entries {
 			lessonPlaced[e.LessonID]++
@@ -182,11 +161,17 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			if lessonPlaced[l.ID] < l.HoursPerWeek {
 				label := fmt.Sprintf("Урок ID %d: %s (%s) — нужно %d ч, размещено %d",
 					l.ID, className(l.ClassID), subjName(l.SubjectID), l.HoursPerWeek, lessonPlaced[l.ID])
-				unplacedList.Append(label)
+				entry := widget.NewEntry()
+				entry.SetText(label)
+				entry.Disable()
+				unplacedItems = append(unplacedItems, entry)
 			}
 		}
+		unplacedListContainer.Objects = unplacedItems
+		unplacedListContainer.Refresh()
 
-		conflictsList.Set([]string{})
+		// Накладки
+		conflictsItems := make([]fyne.CanvasObject, 0)
 		entryMap := map[int]domain.ScheduleEntry{}
 		for _, e := range entries {
 			entryMap[e.ID] = e
@@ -194,13 +179,22 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		dayNames := []string{"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"}
 		for id := range conflictIDs {
 			e := entryMap[id]
-			conflictsList.Append(fmt.Sprintf("%s %s П%d: конфликт (%s — %s)",
+			label := fmt.Sprintf("%s %s П%d: конфликт (%s — %s)",
 				className(e.ClassID), dayNames[e.DayOfWeek], e.Timeslot+1,
-				teachName(e.TeacherID), subjName(e.SubjectID)))
+				teachName(e.TeacherID), subjName(e.SubjectID))
+			entry := widget.NewEntry()
+			entry.SetText(label)
+			entry.Disable()
+			conflictsItems = append(conflictsItems, entry)
 		}
+		conflictsListContainer.Objects = conflictsItems
+		conflictsListContainer.Refresh()
 
 		violationsLabel.SetText(fmt.Sprintf("%d", 0))
 	}
+
+	unplacedListContainer = container.NewVBox()
+	conflictsListContainer = container.NewVBox()
 
 	refreshBtn.OnTapped = refresh
 	refresh()
@@ -223,12 +217,12 @@ func buildIssuesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		container.NewHBox(
 			container.NewVBox(
 				widget.NewLabel("Не размещённые уроки:"),
-				container.NewScroll(unplacedView),
+				container.NewScroll(unplacedListContainer),
 			),
 			widget.NewSeparator(),
 			container.NewVBox(
 				widget.NewLabel("Накладки:"),
-				container.NewScroll(conflictsView),
+				container.NewScroll(conflictsListContainer),
 			),
 		),
 	)

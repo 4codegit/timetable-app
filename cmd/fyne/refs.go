@@ -73,47 +73,33 @@ func refreshSchoolsSelect(store *db.Store, selectWidget *widget.Select) {
 // ---------- Учителя ----------
 
 func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
-	var list *widget.List
-	list = widget.NewList(
-		func() int {
-			if activeSchoolID == 0 {
-				return 0
-			}
-			ts, _ := store.ListTeachers(activeSchoolID)
-			return len(ts)
-		},
-		func() fyne.CanvasObject {
+	var listContainer *fyne.Container
+	var refreshList func()
+
+	refreshList = func() {
+		if activeSchoolID == 0 {
+			listContainer.Objects = nil
+			listContainer.Refresh()
+			return
+		}
+		ts, err := store.ListTeachers(activeSchoolID)
+		if err != nil {
+			return
+		}
+		items := make([]fyne.CanvasObject, 0, len(ts))
+		for _, t := range ts {
 			nameEd := widget.NewEntry()
-			shortEd := widget.NewEntry()
-			btnSave := widget.NewButton("Сохранить", nil)
-			btnDel := widget.NewButton("Удалить", nil)
-			btnSave.Importance = widget.LowImportance
-			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				container.NewHBox(nameEd, shortEd),
-				nil,
-				container.NewHBox(btnSave, btnDel),
-			)
-		},
-		func(i widget.ListItemID, obj fyne.CanvasObject) {
-			if activeSchoolID == 0 {
-				return
-			}
-			ts, err := store.ListTeachers(activeSchoolID)
-			if err != nil || i >= len(ts) {
-				return
-			}
-			t := ts[i]
-			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
-			shortEd := box.Objects[1].(*widget.Entry)
 			nameEd.SetText(t.Name)
-			shortEd.SetText(t.ShortName)
 			nameEd.Disable()
+			shortEd := widget.NewEntry()
+			shortEd.SetText(t.ShortName)
 			shortEd.Disable()
 
-			btnSave := box.Objects[2].(*widget.Button)
+			btnSave := widget.NewButton("Сохранить", nil)
+			btnSave.Importance = widget.LowImportance
+			btnDel := widget.NewButton("Удалить", nil)
+			btnDel.Importance = widget.DangerImportance
+
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
 				shortEd.Enable()
@@ -134,16 +120,28 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				}
 			}
 
-			btnDel := box.Objects[3].(*widget.Button)
 			btnDel.OnTapped = func() {
 				if err := store.DeleteTeacher(t.ID); err != nil {
 					showError(w, "Ошибка: "+err.Error())
 					return
 				}
-				list.Refresh()
+				refreshList()
 			}
-		},
-	)
+
+			row := container.NewBorder(
+				nil, nil,
+				container.NewHBox(nameEd, shortEd),
+				nil,
+				container.NewHBox(btnSave, btnDel),
+			)
+			items = append(items, row)
+		}
+		listContainer.Objects = items
+		listContainer.Refresh()
+	}
+
+	listContainer = container.NewVBox()
+	refreshList()
 
 	nameEd := widget.NewEntry()
 	nameEd.SetPlaceHolder("Имя")
@@ -161,7 +159,7 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		}
 		nameEd.SetText("")
 		shortEd.SetText("")
-		list.Refresh()
+		refreshList()
 	})
 	addBtn.Importance = widget.HighImportance
 
@@ -178,54 +176,40 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			nil,
 		),
 		widget.NewSeparator(),
-		container.NewScroll(list),
+		container.NewScroll(listContainer),
 	)
 }
 
 // ---------- Предметы ----------
 
 func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
-	var list *widget.List
-	list = widget.NewList(
-		func() int {
-			if activeSchoolID == 0 {
-				return 0
-			}
-			subs, _ := store.ListSubjects(activeSchoolID)
-			return len(subs)
-		},
-		func() fyne.CanvasObject {
+	var listContainer *fyne.Container
+	var refreshList func()
+
+	refreshList = func() {
+		if activeSchoolID == 0 {
+			listContainer.Objects = nil
+			listContainer.Refresh()
+			return
+		}
+		subs, err := store.ListSubjects(activeSchoolID)
+		if err != nil {
+			return
+		}
+		items := make([]fyne.CanvasObject, 0, len(subs))
+		for _, s := range subs {
 			nameEd := widget.NewEntry()
-			shortEd := widget.NewEntry()
-			btnSave := widget.NewButton("Сохранить", nil)
-			btnDel := widget.NewButton("Удалить", nil)
-			btnSave.Importance = widget.LowImportance
-			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				container.NewHBox(nameEd, shortEd),
-				nil,
-				container.NewHBox(btnSave, btnDel),
-			)
-		},
-		func(i widget.ListItemID, obj fyne.CanvasObject) {
-			if activeSchoolID == 0 {
-				return
-			}
-			subs, err := store.ListSubjects(activeSchoolID)
-			if err != nil || i >= len(subs) {
-				return
-			}
-			s := subs[i]
-			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
-			shortEd := box.Objects[1].(*widget.Entry)
 			nameEd.SetText(s.Name)
-			shortEd.SetText(s.ShortName)
 			nameEd.Disable()
+			shortEd := widget.NewEntry()
+			shortEd.SetText(s.ShortName)
 			shortEd.Disable()
 
-			btnSave := box.Objects[2].(*widget.Button)
+			btnSave := widget.NewButton("Сохранить", nil)
+			btnSave.Importance = widget.LowImportance
+			btnDel := widget.NewButton("Удалить", nil)
+			btnDel.Importance = widget.DangerImportance
+
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
 				shortEd.Enable()
@@ -246,16 +230,28 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				}
 			}
 
-			btnDel := box.Objects[3].(*widget.Button)
 			btnDel.OnTapped = func() {
 				if err := store.DeleteSubject(s.ID); err != nil {
 					showError(w, "Ошибка: "+err.Error())
 					return
 				}
-				list.Refresh()
+				refreshList()
 			}
-		},
-	)
+
+			row := container.NewBorder(
+				nil, nil,
+				container.NewHBox(nameEd, shortEd),
+				nil,
+				container.NewHBox(btnSave, btnDel),
+			)
+			items = append(items, row)
+		}
+		listContainer.Objects = items
+		listContainer.Refresh()
+	}
+
+	listContainer = container.NewVBox()
+	refreshList()
 
 	nameEd := widget.NewEntry()
 	nameEd.SetPlaceHolder("Название предмета")
@@ -273,7 +269,7 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		}
 		nameEd.SetText("")
 		shortEd.SetText("")
-		list.Refresh()
+		refreshList()
 	})
 	addBtn.Importance = widget.HighImportance
 
@@ -290,49 +286,37 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			nil,
 		),
 		widget.NewSeparator(),
-		container.NewScroll(list),
+		container.NewScroll(listContainer),
 	)
 }
 
 // ---------- Классы ----------
 
 func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
-	var list *widget.List
-	list = widget.NewList(
-		func() int {
-			if activeSchoolID == 0 {
-				return 0
-			}
-			classes, _ := store.ListClasses(activeSchoolID)
-			return len(classes)
-		},
-		func() fyne.CanvasObject {
+	var listContainer *fyne.Container
+	var refreshList func()
+
+	refreshList = func() {
+		if activeSchoolID == 0 {
+			listContainer.Objects = nil
+			listContainer.Refresh()
+			return
+		}
+		classes, err := store.ListClasses(activeSchoolID)
+		if err != nil {
+			return
+		}
+		items := make([]fyne.CanvasObject, 0, len(classes))
+		for _, c := range classes {
 			nameEd := widget.NewEntry()
-			btnSave := widget.NewButton("Сохранить", nil)
-			btnDel := widget.NewButton("Удалить", nil)
-			btnSave.Importance = widget.LowImportance
-			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				nameEd, nil,
-				container.NewHBox(btnSave, btnDel),
-			)
-		},
-		func(i widget.ListItemID, obj fyne.CanvasObject) {
-			if activeSchoolID == 0 {
-				return
-			}
-			classes, err := store.ListClasses(activeSchoolID)
-			if err != nil || i >= len(classes) {
-				return
-			}
-			c := classes[i]
-			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
 			nameEd.SetText(c.Name)
 			nameEd.Disable()
 
-			btnSave := box.Objects[1].(*widget.Button)
+			btnSave := widget.NewButton("Сохранить", nil)
+			btnSave.Importance = widget.LowImportance
+			btnDel := widget.NewButton("Удалить", nil)
+			btnDel.Importance = widget.DangerImportance
+
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
 				btnSave.SetText("Сохранить")
@@ -350,16 +334,27 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				}
 			}
 
-			btnDel := box.Objects[2].(*widget.Button)
 			btnDel.OnTapped = func() {
 				if err := store.DeleteClass(c.ID); err != nil {
 					showError(w, "Ошибка: "+err.Error())
 					return
 				}
-				list.Refresh()
+				refreshList()
 			}
-		},
-	)
+
+			row := container.NewBorder(
+				nil, nil,
+				nameEd, nil,
+				container.NewHBox(btnSave, btnDel),
+			)
+			items = append(items, row)
+		}
+		listContainer.Objects = items
+		listContainer.Refresh()
+	}
+
+	listContainer = container.NewVBox()
+	refreshList()
 
 	nameEd := widget.NewEntry()
 	nameEd.SetPlaceHolder("Название класса (например, 10А)")
@@ -374,7 +369,7 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 		nameEd.SetText("")
-		list.Refresh()
+		refreshList()
 	})
 	addBtn.Importance = widget.HighImportance
 
@@ -391,49 +386,37 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			nil,
 		),
 		widget.NewSeparator(),
-		container.NewScroll(list),
+		container.NewScroll(listContainer),
 	)
 }
 
 // ---------- Кабинеты ----------
 
 func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
-	var list *widget.List
-	list = widget.NewList(
-		func() int {
-			if activeSchoolID == 0 {
-				return 0
-			}
-			rooms, _ := store.ListRooms(activeSchoolID)
-			return len(rooms)
-		},
-		func() fyne.CanvasObject {
+	var listContainer *fyne.Container
+	var refreshList func()
+
+	refreshList = func() {
+		if activeSchoolID == 0 {
+			listContainer.Objects = nil
+			listContainer.Refresh()
+			return
+		}
+		rooms, err := store.ListRooms(activeSchoolID)
+		if err != nil {
+			return
+		}
+		items := make([]fyne.CanvasObject, 0, len(rooms))
+		for _, r := range rooms {
 			nameEd := widget.NewEntry()
-			btnSave := widget.NewButton("Сохранить", nil)
-			btnDel := widget.NewButton("Удалить", nil)
-			btnSave.Importance = widget.LowImportance
-			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				nameEd, nil,
-				container.NewHBox(btnSave, btnDel),
-			)
-		},
-		func(i widget.ListItemID, obj fyne.CanvasObject) {
-			if activeSchoolID == 0 {
-				return
-			}
-			rooms, err := store.ListRooms(activeSchoolID)
-			if err != nil || i >= len(rooms) {
-				return
-			}
-			r := rooms[i]
-			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
 			nameEd.SetText(r.Name)
 			nameEd.Disable()
 
-			btnSave := box.Objects[1].(*widget.Button)
+			btnSave := widget.NewButton("Сохранить", nil)
+			btnSave.Importance = widget.LowImportance
+			btnDel := widget.NewButton("Удалить", nil)
+			btnDel.Importance = widget.DangerImportance
+
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
 				btnSave.SetText("Сохранить")
@@ -451,16 +434,27 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				}
 			}
 
-			btnDel := box.Objects[2].(*widget.Button)
 			btnDel.OnTapped = func() {
 				if err := store.DeleteRoom(r.ID); err != nil {
 					showError(w, "Ошибка: "+err.Error())
 					return
 				}
-				list.Refresh()
+				refreshList()
 			}
-		},
-	)
+
+			row := container.NewBorder(
+				nil, nil,
+				nameEd, nil,
+				container.NewHBox(btnSave, btnDel),
+			)
+			items = append(items, row)
+		}
+		listContainer.Objects = items
+		listContainer.Refresh()
+	}
+
+	listContainer = container.NewVBox()
+	refreshList()
 
 	nameEd := widget.NewEntry()
 	nameEd.SetPlaceHolder("Название кабинета")
@@ -475,7 +469,7 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 		nameEd.SetText("")
-		list.Refresh()
+		refreshList()
 	})
 	addBtn.Importance = widget.HighImportance
 
@@ -492,7 +486,7 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			nil,
 		),
 		widget.NewSeparator(),
-		container.NewScroll(list),
+		container.NewScroll(listContainer),
 	)
 }
 
@@ -554,49 +548,49 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	}
 	updateSelects()
 
-	var list *widget.List
-	list = widget.NewList(
-		func() int {
-			if activeSchoolID == 0 {
-				return 0
-			}
-			lessons, _ := store.ListLessons(activeSchoolID)
-			return len(lessons)
-		},
-		func() fyne.CanvasObject {
+	var listContainer *fyne.Container
+	var refreshList func()
+
+	refreshList = func() {
+		if activeSchoolID == 0 {
+			listContainer.Objects = nil
+			listContainer.Refresh()
+			return
+		}
+		lessons, err := store.ListLessons(activeSchoolID)
+		if err != nil {
+			return
+		}
+		items := make([]fyne.CanvasObject, 0, len(lessons))
+		for _, l := range lessons {
 			nameEd := widget.NewEntry()
-			btnDel := widget.NewButton("Удалить", nil)
-			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				nameEd, nil,
-				btnDel,
-			)
-		},
-		func(i widget.ListItemID, obj fyne.CanvasObject) {
-			if activeSchoolID == 0 {
-				return
-			}
-			lessons, err := store.ListLessons(activeSchoolID)
-			if err != nil || i >= len(lessons) {
-				return
-			}
-			l := lessons[i]
-			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
 			nameEd.SetText(fmt.Sprintf("ID %d: %s → %s, %d ч/нед", l.ID, getClassName(classes, l.ClassID), getSubjName(subjects, l.SubjectID), l.HoursPerWeek))
 			nameEd.Disable()
 
-			btnDel := box.Objects[1].(*widget.Button)
+			btnDel := widget.NewButton("Удалить", nil)
+			btnDel.Importance = widget.DangerImportance
+
 			btnDel.OnTapped = func() {
 				if err := store.DeleteLesson(l.ID); err != nil {
 					showError(w, "Ошибка: "+err.Error())
 					return
 				}
-				list.Refresh()
+				refreshList()
 			}
-		},
-	)
+
+			row := container.NewBorder(
+				nil, nil,
+				nameEd, nil,
+				btnDel,
+			)
+			items = append(items, row)
+		}
+		listContainer.Objects = items
+		listContainer.Refresh()
+	}
+
+	listContainer = container.NewVBox()
+	refreshList()
 
 	addBtn := widget.NewButton("Добавить урок", func() {
 		if activeSchoolID == 0 || classSelect.Selected == "" || subjectSelect.Selected == "" || teacherSelect.Selected == "" {
@@ -632,7 +626,7 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 		hoursEd.SetText("")
-		list.Refresh()
+		refreshList()
 	})
 	addBtn.Importance = widget.HighImportance
 
@@ -650,7 +644,7 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			nil,
 		),
 		widget.NewSeparator(),
-		container.NewScroll(list),
+		container.NewScroll(listContainer),
 	)
 }
 
