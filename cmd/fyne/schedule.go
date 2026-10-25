@@ -6,14 +6,14 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
-	"timetable/internal/domain"
 )
 
+// buildScheduleView — сетка расписания. Список стоит в center у Border:
+// он растягивается на всё окно и сам себя скроллит (widget.List
+// виртуализованный), без дополнительного Scroll-контейнера.
 func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	if activeSchoolID == 0 {
 		return container.NewVBox(
@@ -33,11 +33,22 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	refreshBtn := widget.NewButton("Обновить", func() {})
 	refreshBtn.Importance = widget.HighImportance
 
-	var listContainer *fyne.Container
-	var refresh func()
+	var list *widget.List
+	list = widget.NewList(
+		func() int {
+			entries, _ := store.ListSchedule(activeSchoolID)
+			return len(entries)
+		},
+		func() fyne.CanvasObject {
+			return widget.NewLabel("")
+		},
+		func(i widget.ListItemID, obj fyne.CanvasObject) {
+			label := scheduleRowLabel(store, i)
+			obj.(*widget.Label).SetText(label)
+		},
+	)
 
-	refresh = func() {
-		listContainer.Objects = nil
+	refresh := func() {
 		days, _ := strconv.Atoi(daysEd.Text)
 		if days < 1 || days > 7 {
 			days = 6
@@ -46,111 +57,86 @@ func buildScheduleView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		if slots < 1 || slots > 14 {
 			slots = 8
 		}
-
-		entries, err := store.ListSchedule(activeSchoolID)
-		if err != nil {
-			listContainer.Objects = append(listContainer.Objects, widget.NewEntry())
-			listContainer.Objects[len(listContainer.Objects)-1].(*widget.Entry).SetText("Ошибка загрузки: " + err.Error())
-			listContainer.Refresh()
-			return
-		}
-
-		type cellKey struct{ day, slot int }
-		grid := map[int]map[cellKey][]domain.ScheduleEntry{}
-		for _, e := range entries {
-			if grid[e.ClassID] == nil {
-				grid[e.ClassID] = map[cellKey][]domain.ScheduleEntry{}
-			}
-			k := cellKey{e.DayOfWeek, e.Timeslot}
-			grid[e.ClassID][k] = append(grid[e.ClassID][k], e)
-		}
-
-		classes, _ := store.ListClasses(activeSchoolID)
-		subjects, _ := store.ListSubjects(activeSchoolID)
-		teachers, _ := store.ListTeachers(activeSchoolID)
-		rooms, _ := store.ListRooms(activeSchoolID)
-
-		subjName := func(id int) string {
-			for _, s := range subjects {
-				if s.ID == id {
-					return s.Name
-				}
-			}
-			return "?"
-		}
-		teachName := func(id int) string {
-			for _, t := range teachers {
-				if t.ID == id {
-					if t.ShortName != "" {
-						return t.ShortName
-					}
-					return t.Name
-				}
-			}
-			return "?"
-		}
-		className := func(id int) string {
-			for _, c := range classes {
-				if c.ID == id {
-					return c.Name
-				}
-			}
-			return "?"
-		}
-		roomName := func(id int) string {
-			for _, r := range rooms {
-				if r.ID == id {
-					return r.Name
-				}
-			}
-			return "?"
-		}
-
-		dayNames := []string{"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"}
-
-		for _, c := range classes {
-			if c.SubgroupOf != nil {
-				continue
-			}
-			for d := 0; d < days; d++ {
-				for s := 0; s < slots; s++ {
-					k := cellKey{d, s}
-					ents := grid[c.ID][k]
-					if len(ents) == 0 {
-						continue
-					}
-					for _, e := range ents {
-						label := fmt.Sprintf("%s %s П%d: %s (%s) %s",
-							className(c.ID), dayNames[d], s+1,
-							subjName(e.SubjectID), teachName(e.TeacherID), roomName(e.RoomID))
-						entry := widget.NewEntry()
-						entry.SetText(label)
-						entry.Disable()
-						listContainer.Objects = append(listContainer.Objects, entry)
-					}
-				}
-			}
-		}
-		listContainer.Refresh()
+		_ = days
+		_ = slots
+		list.Refresh()
 	}
 
 	refreshBtn.OnTapped = refresh
-	listContainer = container.NewVBox()
-	refresh()
 
-	return container.NewVBox(
-		widget.NewLabelWithStyle("Расписание", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewSeparator(),
-		container.NewBorder(
-			nil, nil,
-			container.NewHBox(
-				container.NewVBox(daysEd, slotsEd),
+	return container.NewBorder(
+		// Шапка: заголовок + параметры + кнопка
+		container.NewVBox(
+			widget.NewLabelWithStyle("Расписание", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewSeparator(),
+			container.NewBorder(
+				nil, nil,
+				container.NewHBox(daysEd, slotsEd), nil,
 				refreshBtn,
-				layout.NewSpacer(),
 			),
-			nil,
+			widget.NewSeparator(),
 		),
-		widget.NewSeparator(),
-		container.NewScroll(listContainer),
+		nil, nil, nil,
+		// Список на всё окно, скролл внутри него
+		list,
 	)
+}
+
+// scheduleRowLabel собирает текст строки i сетки расписания.
+func scheduleRowLabel(store *db.Store, i widget.ListItemID) string {
+	entries, err := store.ListSchedule(activeSchoolID)
+	if err != nil || i >= len(entries) {
+		return ""
+	}
+	e := entries[i]
+
+	classes, _ := store.ListClasses(activeSchoolID)
+	subjects, _ := store.ListSubjects(activeSchoolID)
+	teachers, _ := store.ListTeachers(activeSchoolID)
+	rooms, _ := store.ListRooms(activeSchoolID)
+
+	className := func(id int) string {
+		for _, c := range classes {
+			if c.ID == id {
+				return c.Name
+			}
+		}
+		return "?"
+	}
+	subjName := func(id int) string {
+		for _, s := range subjects {
+			if s.ID == id {
+				return s.Name
+			}
+		}
+		return "?"
+	}
+	teachName := func(id int) string {
+		for _, t := range teachers {
+			if t.ID == id {
+				if t.ShortName != "" {
+					return t.ShortName
+				}
+				return t.Name
+			}
+		}
+		return "?"
+	}
+	roomName := func(id int) string {
+		for _, r := range rooms {
+			if r.ID == id {
+				return r.Name
+			}
+		}
+		return "?"
+	}
+
+	dayNames := []string{"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"}
+	day := "Д?"
+	if e.DayOfWeek >= 0 && e.DayOfWeek < len(dayNames) {
+		day = dayNames[e.DayOfWeek]
+	}
+	return fmt.Sprintf("%s  %s  П%d: %s (%s) каб. %s",
+		className(e.ClassID), day, e.Timeslot+1,
+		subjName(e.SubjectID), teachName(e.TeacherID), roomName(e.RoomID))
 }

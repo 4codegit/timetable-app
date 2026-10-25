@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -111,7 +112,7 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 		navBtn("Экспорт", func() { ui.showExport() }),
 	)
 
-	ui.content = container.NewVBox(ui.showWelcome())
+	ui.content = container.NewMax(ui.showWelcome())
 
 	split := container.NewHSplit(ui.sidebar, ui.content)
 	split.Offset = 0.18
@@ -124,8 +125,11 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 	return ui
 }
 
+// SetContent переключает активный вид; NewMax растягивает его на всё
+// свободное пространство окна — иначе VBox сжимает вид в маленькую
+// область и скролл крутится внутри неё.
 func (ui *UI) SetContent(obj fyne.CanvasObject) {
-	ui.content.Objects = []fyne.CanvasObject{obj}
+	ui.content.Objects = []fyne.CanvasObject{container.NewMax(obj)}
 	ui.content.Refresh()
 }
 
