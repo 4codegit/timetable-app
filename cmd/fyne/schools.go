@@ -56,7 +56,9 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			}
 
 			row := container.NewBorder(
-				nil, nil, nameEd, nil,
+				nil, nil,
+				container.NewHBox(nameEd, layout.NewSpacer()),
+				nil,
 				container.NewHBox(btnSave, btnDel),
 			)
 			items = append(items, row)

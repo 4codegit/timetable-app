@@ -130,7 +130,7 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 			row := container.NewBorder(
 				nil, nil,
-				container.NewHBox(nameEd, shortEd),
+				container.NewHBox(nameEd, shortEd, layout.NewSpacer()),
 				nil,
 				container.NewHBox(btnSave, btnDel),
 			)
@@ -143,10 +143,10 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	listContainer = container.NewVBox()
 	refreshList()
 
-	nameEd := widget.NewEntry()
-	nameEd.SetPlaceHolder("Имя")
-	shortEd := widget.NewEntry()
-	shortEd.SetPlaceHolder("Кратко")
+			nameEd := widget.NewEntry()
+			nameEd.SetPlaceHolder("Имя")
+			shortEd := widget.NewEntry()
+			shortEd.SetPlaceHolder("Кратко")
 
 	addBtn := widget.NewButton("Добавить учителя", func() {
 		if activeSchoolID == 0 || nameEd.Text == "" {
@@ -169,7 +169,8 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		container.NewBorder(
 			nil, nil,
 			container.NewHBox(
-				container.NewVBox(nameEd, shortEd),
+				container.NewVBox(nameEd),
+				container.NewVBox(shortEd),
 				addBtn,
 				layout.NewSpacer(),
 			),
@@ -240,7 +241,7 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 			row := container.NewBorder(
 				nil, nil,
-				container.NewHBox(nameEd, shortEd),
+				container.NewHBox(nameEd, shortEd, layout.NewSpacer()),
 				nil,
 				container.NewHBox(btnSave, btnDel),
 			)
@@ -253,10 +254,10 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	listContainer = container.NewVBox()
 	refreshList()
 
-	nameEd := widget.NewEntry()
-	nameEd.SetPlaceHolder("Название предмета")
-	shortEd := widget.NewEntry()
-	shortEd.SetPlaceHolder("Кратко")
+			nameEd := widget.NewEntry()
+			nameEd.SetPlaceHolder("Название предмета")
+			shortEd := widget.NewEntry()
+			shortEd.SetPlaceHolder("Кратко")
 
 	addBtn := widget.NewButton("Добавить предмет", func() {
 		if activeSchoolID == 0 || nameEd.Text == "" {
@@ -356,8 +357,8 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	listContainer = container.NewVBox()
 	refreshList()
 
-	nameEd := widget.NewEntry()
-	nameEd.SetPlaceHolder("Название класса (например, 10А)")
+			nameEd := widget.NewEntry()
+			nameEd.SetPlaceHolder("Название класса (например, 10А)")
 
 	addBtn := widget.NewButton("Добавить класс", func() {
 		if activeSchoolID == 0 || nameEd.Text == "" {
@@ -456,8 +457,8 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	listContainer = container.NewVBox()
 	refreshList()
 
-	nameEd := widget.NewEntry()
-	nameEd.SetPlaceHolder("Название кабинета")
+			nameEd := widget.NewEntry()
+			nameEd.SetPlaceHolder("Название кабинета")
 
 	addBtn := widget.NewButton("Добавить кабинет", func() {
 		if activeSchoolID == 0 || nameEd.Text == "" {
@@ -513,11 +514,11 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		}
 	}
 
-	classSelect := widget.NewSelect([]string{}, func(string) {})
-	subjectSelect := widget.NewSelect([]string{}, func(string) {})
-	teacherSelect := widget.NewSelect([]string{}, func(string) {})
-	hoursEd := widget.NewEntry()
-	hoursEd.SetPlaceHolder("Часов/нед")
+		classSelect := widget.NewSelect([]string{}, func(string) {})
+		subjectSelect := widget.NewSelect([]string{}, func(string) {})
+		teacherSelect := widget.NewSelect([]string{}, func(string) {})
+		hoursEd := widget.NewEntry()
+		hoursEd.SetPlaceHolder("Часов/нед")
 
 	loadRefs()
 	updateSelects := func() {
