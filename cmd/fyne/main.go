@@ -1,11 +1,15 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -19,13 +23,16 @@ const (
 )
 
 type UI struct {
-	store    *db.Store
-	win      fyne.Window
-	sidebar  *fyne.Container
-	content  *fyne.Container
-	topBar   *fyne.Container
-	root     *fyne.Container
-	schoolID int
+	store         *db.Store
+	win           fyne.Window
+	sidebar       *fyne.Container
+	content       *fyne.Container
+	topBar        *fyne.Container
+	root          *fyne.Container
+	schoolID      int
+	page          string
+	schoolSelect  *widget.Select
+	schoolByLabel map[string]int
 }
 
 func main() {
@@ -41,6 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("db init failed: %v", err)
 	}
+	defer store.Close()
 
 	ui := NewUI(store, w)
 	w.SetContent(ui.Root())
@@ -48,45 +56,51 @@ func main() {
 }
 
 func defaultDBPath() string {
-	dir, _ := fyneAppDir()
-	return joinPath(dir, "timetable.db")
-}
-
-func fyneAppDir() (string, error) {
-	return ".", nil
-}
-
-func joinPath(elem ...string) string {
-	result := ""
-	for i, e := range elem {
-		if i > 0 {
-			result += "/"
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		if writableDir(dir) {
+			return filepath.Join(dir, "timetable.db")
 		}
-		result += e
 	}
-	return result
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return filepath.Join(".", "timetable.db")
+	}
+	dir := filepath.Join(base, "Timetable")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return filepath.Join(".", "timetable.db")
+	}
+	return filepath.Join(dir, "timetable.db")
+}
+
+func writableDir(dir string) bool {
+	f, err := os.CreateTemp(dir, ".timetable-write-check-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
 }
 
 func NewUI(store *db.Store, w fyne.Window) *UI {
 	ui := &UI{
-		store:    store,
-		win:      w,
-		schoolID: 0,
+		store:         store,
+		win:           w,
+		schoolID:      0,
+		page:          "welcome",
+		schoolByLabel: make(map[string]int),
 	}
 
 	versionLbl := widget.NewLabel(appName + " v" + appVersion)
 	versionLbl.TextStyle.Bold = true
 
-	schoolSelect := widget.NewSelect([]string{}, func(s string) {
-		schools, err := store.ListSchools()
-		if err != nil {
-			return
-		}
-		for _, sc := range schools {
-			if sc.Name == s {
-				ui.schoolID = sc.ID
-				break
-			}
+	ui.schoolSelect = widget.NewSelect([]string{}, func(label string) {
+		if id := ui.schoolByLabel[label]; id != 0 && id != activeSchoolID {
+			ui.schoolID = id
+			setActiveSchoolID(id)
+			ui.showPage(ui.page)
 		}
 	})
 
@@ -96,7 +110,7 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 			versionLbl,
 			layout.NewSpacer(),
 			widget.NewLabel("Школа:"),
-			schoolSelect,
+			ui.schoolSelect,
 		),
 		nil,
 	)
@@ -106,6 +120,8 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 		widget.NewSeparator(),
 		navBtn("Школы", func() { ui.showSchools() }),
 		navBtn("Справочники", func() { ui.showRefs() }),
+		navBtn("Ограничения", func() { ui.showConstraints() }),
+		navBtn("Настройки", func() { ui.showSettings() }),
 		navBtn("Генерация", func() { ui.showGeneration() }),
 		navBtn("Расписание", func() { ui.showSchedule() }),
 		navBtn("Проблемы", func() { ui.showIssues() }),
@@ -117,12 +133,82 @@ func NewUI(store *db.Store, w fyne.Window) *UI {
 	split := container.NewHSplit(ui.sidebar, ui.content)
 	split.Offset = 0.18
 
-	ui.root = container.NewVBox(ui.topBar, split)
+	ui.root = container.NewBorder(ui.topBar, nil, nil, nil, split)
 
-	refreshSchoolsSelect(store, schoolSelect)
-
+	ui.refreshSchoolSelect(0, false)
 	ui.showWelcome()
 	return ui
+}
+
+func (ui *UI) refreshSchoolSelect(preferredID int, refreshPage bool) {
+	schools, err := ui.store.ListSchools()
+	if err != nil {
+		showError(ui.win, "Не удалось загрузить школы: "+err.Error())
+		return
+	}
+	ui.schoolByLabel = make(map[string]int, len(schools))
+	options := make([]string, 0, len(schools))
+	selected := activeSchoolID
+	if preferredID > 0 {
+		selected = preferredID
+	}
+	found := false
+	selectedLabel := ""
+	for _, sc := range schools {
+		label := fmt.Sprintf("%s  (#%d)", sc.Name, sc.ID)
+		options = append(options, label)
+		ui.schoolByLabel[label] = sc.ID
+		if sc.ID == selected {
+			found = true
+			selectedLabel = label
+		}
+	}
+	if len(schools) == 0 {
+		selected = 0
+	} else if !found {
+		selected = schools[0].ID
+		selectedLabel = options[0]
+	}
+	ui.schoolSelect.Options = options
+	onChanged := ui.schoolSelect.OnChanged
+	ui.schoolSelect.OnChanged = nil
+	if selectedLabel != "" {
+		ui.schoolSelect.SetSelected(selectedLabel)
+	} else {
+		ui.schoolSelect.ClearSelected()
+	}
+	ui.schoolSelect.OnChanged = onChanged
+	ui.schoolSelect.Refresh()
+	ui.schoolID = selected
+	setActiveSchoolID(selected)
+	if refreshPage {
+		ui.showPage(ui.page)
+	}
+}
+
+func (ui *UI) showPage(page string) {
+	ui.page = page
+	switch page {
+	case "schools":
+		ui.SetContent(buildSchoolsView(ui.store, ui.win, func(id int) { ui.refreshSchoolSelect(id, true) }))
+	case "refs":
+		ui.SetContent(buildRefsView(ui.store, ui.win))
+	case "constraints":
+		ui.SetContent(buildConstraintsView(ui.store, ui.win))
+	case "settings":
+		ui.SetContent(buildSettingsView(ui.store, ui.win))
+	case "generation":
+		ui.SetContent(buildGenerationView(ui.store, ui.win))
+	case "schedule":
+		ui.SetContent(buildScheduleView(ui.store, ui.win))
+	case "issues":
+		ui.SetContent(buildIssuesView(ui.store, ui.win))
+	case "export":
+		ui.SetContent(buildExportView(ui.store, ui.win, func(id int) { ui.refreshSchoolSelect(id, true) }))
+	default:
+		ui.page = "welcome"
+		ui.SetContent(ui.showWelcome())
+	}
 }
 
 // SetContent переключает активный вид; NewMax растягивает его на всё
@@ -146,8 +232,7 @@ func navBtn(label string, onTap func()) *widget.Button {
 }
 
 func showError(w fyne.Window, msg string) {
-	dlg := widget.NewPopUp(widget.NewLabel(msg), w.Canvas())
-	dlg.Show()
+	dialog.ShowError(fmt.Errorf("%s", msg), w)
 }
 
 func (ui *UI) showWelcome() fyne.CanvasObject {
@@ -172,9 +257,11 @@ func card(icon, title, desc string, onTap func()) *widget.Button {
 	return b
 }
 
-func (ui *UI) showSchools()    { ui.SetContent(buildSchoolsView(ui.store, ui.win)) }
-func (ui *UI) showRefs()       { ui.SetContent(buildRefsView(ui.store, ui.win)) }
-func (ui *UI) showGeneration() { ui.SetContent(buildGenerationView(ui.store, ui.win)) }
-func (ui *UI) showSchedule()   { ui.SetContent(buildScheduleView(ui.store, ui.win)) }
-func (ui *UI) showIssues()     { ui.SetContent(buildIssuesView(ui.store, ui.win)) }
-func (ui *UI) showExport()     { ui.SetContent(buildExportView(ui.store, ui.win)) }
+func (ui *UI) showSchools()     { ui.showPage("schools") }
+func (ui *UI) showRefs()        { ui.showPage("refs") }
+func (ui *UI) showConstraints() { ui.showPage("constraints") }
+func (ui *UI) showSettings()    { ui.showPage("settings") }
+func (ui *UI) showGeneration()  { ui.showPage("generation") }
+func (ui *UI) showSchedule()    { ui.showPage("schedule") }
+func (ui *UI) showIssues()      { ui.showPage("issues") }
+func (ui *UI) showExport()      { ui.showPage("export") }

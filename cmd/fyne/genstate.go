@@ -3,11 +3,11 @@ package main
 import "sync"
 
 type GenProgress struct {
-	ID      int64  `json:"id"`
-	Placed  int    `json:"placed"`
-	Total   int    `json:"total"`
-	Status  string `json:"status"`
-	Error   string `json:"error,omitempty"`
+	ID     int64  `json:"id"`
+	Placed int    `json:"placed"`
+	Total  int    `json:"total"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
 }
 
 type generationState struct {

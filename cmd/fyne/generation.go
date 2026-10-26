@@ -1,14 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -17,206 +18,294 @@ import (
 )
 
 func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
+	if activeSchoolID == 0 {
+		return emptySchoolView("Генерация")
+	}
+	schoolID := activeSchoolID
+	settings := loadFyneSettings(store, schoolID)
 	daysEd := widget.NewEntry()
-	daysEd.SetPlaceHolder("Дней (1-7)")
-	daysEd.SetText("6")
-
+	daysEd.SetText(strconv.Itoa(settings.Days))
+	daysEd.SetPlaceHolder("1–7")
 	slotsEd := widget.NewEntry()
-	slotsEd.SetPlaceHolder("Слотов в день (1-14)")
-	slotsEd.SetText("8")
-
-	timeoutPreset := widget.NewSelect([]string{"none", "30", "90", "custom"}, func(string) {})
-	timeoutPreset.SetSelected("none")
+	slotsEd.SetText(strconv.Itoa(settings.Slots))
+	slotsEd.SetPlaceHolder("1–14")
+	daysEd.Disable()
+	slotsEd.Disable()
+	timeoutPreset := widget.NewSelect([]string{"Без лимита", "30 секунд", "90 секунд", "Другое"}, nil)
+	if solver.HasPreciseSolver() {
+		timeoutPreset.SetSelected("90 секунд")
+	} else {
+		timeoutPreset.SetSelected("Без лимита")
+	}
 	timeoutCustom := widget.NewEntry()
-	timeoutCustom.SetPlaceHolder("сек")
+	timeoutCustom.SetPlaceHolder("секунды")
 	timeoutCustom.Disable()
-	timeoutPreset.OnChanged = func(s string) {
-		if s == "custom" {
+	timeoutPreset.OnChanged = func(value string) {
+		if value == "Другое" {
 			timeoutCustom.Enable()
 		} else {
 			timeoutCustom.Disable()
 		}
 	}
-
-	usePrecise := widget.NewCheck("Точный CP-SAT (OR-Tools)", func(bool) {})
-
-	generateBtn := widget.NewButton("Сгенерировать расписание", func() {})
-	generateBtn.Importance = widget.HighImportance
-
-	undoBtn := widget.NewButton("Отменить", func() {})
-	undoBtn.Importance = widget.LowImportance
-
-	progressBar := widget.NewProgressBar()
-	progressBar.Min = 0
-	progressBar.Max = 100
-	progressBar.Value = 0
-
-	statusLabel := widget.NewLabel("Готово")
-
-	generateBtn.OnTapped = func() {
-		if activeSchoolID == 0 {
-			showError(w, "Выберите школу в разделе «Справочники»")
+	usePrecise := widget.NewCheck("Точный CP-SAT (OR-Tools)", nil)
+	preciseInfo := widget.NewLabel("")
+	if solver.HasPreciseSolver() {
+		preciseInfo.SetText("В этой сборке доступен OR-Tools CP-SAT.")
+		timeoutPreset.Disable()
+		usePrecise.OnChanged = func(enabled bool) {
+			if enabled {
+				timeoutPreset.Enable()
+				if timeoutPreset.Selected == "Другое" {
+					timeoutCustom.Enable()
+				}
+			} else {
+				timeoutPreset.Disable()
+				timeoutCustom.Disable()
+			}
+		}
+		// Large schedules need CP-SAT when the native solver is available.
+		// Keep it enabled by default so generation does not silently use the
+		// weaker pure-Go fallback.
+		usePrecise.SetChecked(true)
+		timeoutPreset.Enable()
+	} else {
+		usePrecise.Disable()
+		timeoutPreset.Disable()
+		preciseInfo.SetText("OR-Tools не включён в эту сборку; используется стандартный решатель.")
+	}
+	generationButton := widget.NewButton("Сгенерировать расписание", nil)
+	generationButton.Importance = widget.HighImportance
+	cancelButton := widget.NewButton("Остановить", nil)
+	cancelButton.Disable()
+	undoButton := widget.NewButton("Вернуть прошлое расписание", nil)
+	undoButton.Disable()
+	progress := widget.NewProgressBar()
+	progress.Min = 0
+	progress.Max = 1
+	status := widget.NewLabel("Готово")
+	var cancel context.CancelFunc
+	var previous []domain.ScheduleEntry
+	var generationDone bool
+	generationButton.OnTapped = func() {
+		days, slots := settings.Days, settings.Slots
+		if timeoutPreset.Selected == "Другое" {
+			n, err := strconv.Atoi(strings.TrimSpace(timeoutCustom.Text))
+			if err != nil || n < 0 {
+				showError(w, "Введите неотрицательный лимит времени в секундах")
+				return
+			}
+		}
+		timeoutSec := selectedTimeout(timeoutPreset.Selected, timeoutCustom.Text)
+		if timeoutSec > 86400 {
+			showError(w, "Максимальный лимит точного поиска — 24 часа")
 			return
 		}
-
-		days, _ := strconv.Atoi(daysEd.Text)
-		if days < 1 || days > 7 {
-			days = 6
+		if usePrecise.Checked && solver.HasPreciseSolver() && timeoutSec == 0 {
+			showError(w, "Укажите лимит времени: CP-SAT нельзя прервать до завершения поиска.")
+			return
 		}
-		slots, _ := strconv.Atoi(slotsEd.Text)
-		if slots < 1 || slots > 14 {
-			slots = 8
+		lessons, err := store.ListLessons(schoolID)
+		if err != nil {
+			showError(w, "Не удалось загрузить учебный план: "+err.Error())
+			return
 		}
-
-		timeoutSec := 0
-		preset := timeoutPreset.Selected
-		if preset == "custom" {
-			if v, err := strconv.Atoi(timeoutCustom.Text); err == nil && v >= 0 {
-				timeoutSec = v
-			}
-		} else if preset != "none" {
-			if v, err := strconv.Atoi(preset); err == nil {
-				timeoutSec = v
-			}
+		if len(lessons) == 0 {
+			showError(w, "Сначала добавьте уроки в учебный план.")
+			return
 		}
-
-		generateBtn.Disable()
-		progressBar.Value = 0
-		statusLabel.SetText("Запуск генерации...")
-
-		go runGeneration(store, activeSchoolID, days, slots, timeoutSec, usePrecise.Checked,
-			func(placed, total int, status string) {
-				if total > 0 {
-					progressBar.Max = float64(total)
-				}
-				progressBar.Value = float64(placed)
-				statusLabel.SetText(fmt.Sprintf("%s: %d/%d", status, placed, total))
+		previous, err = store.ListSchedule(schoolID)
+		if err != nil {
+			showError(w, "Не удалось сохранить текущее расписание: "+err.Error())
+			return
+		}
+		generationDone = false
+		progress.Value = 0
+		progress.Max = float64(totalLessonHours(lessons))
+		if progress.Max < 1 {
+			progress.Max = 1
+		}
+		status.SetText("Подготовка генерации…")
+		generationButton.Disable()
+		usePrecise.Disable()
+		timeoutPreset.Disable()
+		timeoutCustom.Disable()
+		cancelButton.Enable()
+		undoButton.Disable()
+		if usePrecise.Checked && solver.HasPreciseSolver() {
+			cancelButton.Disable()
+			status.SetText("CP-SAT выполняется до достижения лимита времени…")
+		}
+		ctx, stop := context.WithCancel(context.Background())
+		cancel = stop
+		go runGeneration(ctx, store, schoolID, days, slots, settings.DaysMask, timeoutSec, usePrecise.Checked,
+			func(placed, total int, state string) {
+				fyne.Do(func() {
+					if total > 0 {
+						progress.Max = float64(total)
+					}
+					progress.Value = float64(placed)
+					if state == "running" {
+						status.SetText(fmt.Sprintf("Поиск расписания: %d из %d", placed, total))
+					}
+				})
 			},
-			func() {
-				generateBtn.Enable()
-				statusLabel.SetText("Готово")
+			func(placed, total int, state string, err error) {
+				fyne.Do(func() {
+					if cancel != nil {
+						cancel()
+					}
+					cancel = nil
+					generationButton.Enable()
+					cancelButton.Disable()
+					if solver.HasPreciseSolver() {
+						usePrecise.Enable()
+						if usePrecise.Checked {
+							timeoutPreset.Enable()
+							if timeoutPreset.Selected == "Другое" {
+								timeoutCustom.Enable()
+							}
+						} else {
+							timeoutPreset.Disable()
+							timeoutCustom.Disable()
+						}
+					} else {
+						usePrecise.Disable()
+						timeoutPreset.Disable()
+						timeoutCustom.Disable()
+					}
+					generationDone = true
+					if state == "done" {
+						undoButton.Enable()
+						status.SetText(fmt.Sprintf("Готово: размещено %d из %d уроков", placed, total))
+					} else if state == "cancelled" {
+						status.SetText(fmt.Sprintf("Генерация остановлена. Текущее расписание сохранено без изменений (%d из %d)", placed, total))
+						undoButton.Disable()
+					} else {
+						status.SetText("Ошибка генерации")
+						if err != nil {
+							showError(w, "Ошибка генерации: "+err.Error())
+						}
+					}
+				})
 			},
 		)
 	}
-
-	undoBtn.OnTapped = func() {
-		progressBar.Value = 0
-		statusLabel.SetText("Готово")
-		generateBtn.Enable()
+	cancelButton.OnTapped = func() {
+		if cancel != nil {
+			cancel()
+			cancelButton.Disable()
+			status.SetText("Останавливаю генератор…")
+		}
 	}
-
-	return container.NewVBox(
-		widget.NewLabelWithStyle("Генерация расписания", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewSeparator(),
-		container.NewBorder(
-			nil, nil,
-			container.NewHBox(
-				container.NewGridWithColumns(2,
-					container.NewVBox(daysEd, slotsEd),
-					container.NewVBox(
-						container.NewHBox(widget.NewLabel("Таймаут CP-SAT:"), timeoutPreset),
-						timeoutCustom,
-					),
-					usePrecise,
-				),
-				layout.NewSpacer(),
-				container.NewVBox(generateBtn, undoBtn),
-			),
-			nil,
-		),
-		widget.NewSeparator(),
-		container.NewVBox(
-			container.NewHBox(
-				progressBar,
-				statusLabel,
-			),
-		),
+	undoButton.OnTapped = func() {
+		if !generationDone {
+			return
+		}
+		if err := store.ReplaceSchedule(schoolID, previous); err != nil {
+			showError(w, "Не удалось вернуть расписание: "+err.Error())
+			return
+		}
+		undoButton.Disable()
+		status.SetText("Предыдущее расписание восстановлено.")
+	}
+	return container.NewBorder(
+		container.NewVBox(widget.NewLabelWithStyle("Генерация расписания", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
+		nil, nil, nil,
+		container.NewVScroll(container.NewVBox(
+			widget.NewLabel("Используются выбранные учебные дни и звонки из настроек школы."),
+			widget.NewForm(widget.NewFormItem("Учебных дней", daysEd), widget.NewFormItem("Уроков в день", slotsEd), widget.NewFormItem("Лимит точного поиска", timeoutPreset), widget.NewFormItem("Другой лимит", timeoutCustom)),
+			usePrecise,
+			preciseInfo,
+			container.NewHBox(generationButton, cancelButton, undoButton),
+			container.NewBorder(nil, nil, nil, status, progress),
+		)),
 	)
 }
 
-func runGeneration(store *db.Store, schoolID, days, slots, timeoutSec int, usePrecise bool,
-	onProgress func(placed, total int, status string), onDone func()) {
-
-	lessons, err := store.ListLessons(schoolID)
-	if err != nil {
-		onDone()
-		return
-	}
-	ts, _ := store.ListTeachers(schoolID)
-	cs, _ := store.ListClasses(schoolID)
-	rs, _ := store.ListRooms(schoolID)
-	subs, _ := store.ListSubjects(schoolID)
-	cons, _ := store.ListConstraints(schoolID)
-
-	in := solver.SolveInput{
-		SchoolID:    schoolID,
-		Lessons:     lessons,
-		Teachers:    toTeacherMap(ts),
-		Classes:     toClassMap(cs),
-		Rooms:       rs,
-		Subjects:    toSubjMap(subs),
-		Constraints: cons,
-		Config: domain.SchedulingConfig{
-			DaysPerWeek: days,
-			SlotsPerDay: slots,
-		},
-	}
-
+func totalLessonHours(lessons []domain.Lesson) int {
 	total := 0
 	for _, l := range lessons {
-		if h := l.HoursPerWeek; h > 0 {
-			total += h
+		if l.HoursPerWeek > 0 {
+			total += l.HoursPerWeek
 		}
 	}
+	return total
+}
 
+func selectedTimeout(preset, custom string) int {
+	switch preset {
+	case "30 секунд":
+		return 30
+	case "90 секунд":
+		return 90
+	case "Другое":
+		n, _ := strconv.Atoi(strings.TrimSpace(custom))
+		if n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+func runGeneration(ctx context.Context, store *db.Store, schoolID, days, slots, daysMask, timeoutSec int, usePrecise bool,
+	onProgress func(placed, total int, status string), onDone func(placed, total int, status string, err error)) {
+	finish := func(placed, total int, status string, err error) { onDone(placed, total, status, err) }
+	if usePrecise && !solver.HasPreciseSolver() {
+		finish(0, 0, "error", fmt.Errorf("эта сборка не содержит OR-Tools CP-SAT; пересоберите с тегом -tags ortools"))
+		return
+	}
+	lessons, err := store.ListLessons(schoolID)
+	if err != nil {
+		finish(0, 0, "error", err)
+		return
+	}
+	ts, err := store.ListTeachers(schoolID)
+	if err != nil {
+		finish(0, 0, "error", err)
+		return
+	}
+	cs, err := store.ListClasses(schoolID)
+	if err != nil {
+		finish(0, 0, "error", err)
+		return
+	}
+	rs, err := store.ListRooms(schoolID)
+	if err != nil {
+		finish(0, 0, "error", err)
+		return
+	}
+	subs, err := store.ListSubjects(schoolID)
+	if err != nil {
+		finish(0, 0, "error", err)
+		return
+	}
+	cons, err := store.ListConstraints(schoolID)
+	if err != nil {
+		finish(0, 0, "error", err)
+		return
+	}
+	if len(lessons) == 0 {
+		finish(0, 0, "error", fmt.Errorf("учебный план пуст"))
+		return
+	}
+	in := solver.SolveInput{SchoolID: schoolID, Lessons: lessons, Teachers: toTeacherMap(ts), Classes: toClassMap(cs), Rooms: rs, Subjects: toSubjMap(subs), Constraints: cons,
+		Config: domain.SchedulingConfig{DaysPerWeek: days, SlotsPerDay: slots, DaysMask: daysMask}}
+	total := totalLessonHours(lessons)
+	var result solver.Result
 	if usePrecise {
-		timeout := time.Duration(timeoutSec) * time.Second
-		if timeout <= 0 {
-			timeout = 0
-		}
-		id := genState.newID()
-		genState.set(id, 0, total, "running", "")
-
-		go func() {
-			res := solver.SolvePrecise(nil, in, runtime.NumCPU(), timeout, func(placed int) {
-				genState.set(id, placed, total, "running", "")
-			})
-			if err := store.ReplaceSchedule(schoolID, res.Entries); err != nil {
-				genState.set(id, res.Placed, res.Total, "error", err.Error())
-				onProgress(res.Placed, res.Total, "error")
-				onDone()
-				return
-			}
-			genState.set(id, res.Placed, res.Total, "done", "")
-			onProgress(res.Placed, res.Total, "done")
-			onDone()
-		}()
-
-		go func() {
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
-			for range ticker.C {
-				p, ok := genState.get(id)
-				if !ok {
-					return
-				}
-				onProgress(p.Placed, p.Total, p.Status)
-				if p.Status == "done" || p.Status == "error" {
-					return
-				}
-			}
-		}()
+		result = solver.SolvePrecise(ctx, in, runtime.NumCPU(), time.Duration(timeoutSec)*time.Second, func(placed int) { onProgress(placed, total, "running") })
 	} else {
-		go func() {
-			res := solver.Solve(nil, in, runtime.NumCPU(), 30*time.Second, nil)
-			if err := store.ReplaceSchedule(schoolID, res.Entries); err != nil {
-				onDone()
-				return
-			}
-			onProgress(res.Placed, res.Total, "done")
-			onDone()
-		}()
+		result = solver.Solve(ctx, in, runtime.NumCPU(), 30*time.Second, func(placed int) { onProgress(placed, total, "running") })
 	}
+	if ctx.Err() != nil {
+		finish(result.Placed, result.Total, "cancelled", nil)
+		return
+	}
+	if err := store.ReplaceSchedule(schoolID, result.Entries); err != nil {
+		finish(result.Placed, result.Total, "error", err)
+		return
+	}
+	finish(result.Placed, result.Total, "done", nil)
 }
 
 func toTeacherMap(ts []domain.Teacher) map[int]domain.Teacher {
@@ -226,7 +315,6 @@ func toTeacherMap(ts []domain.Teacher) map[int]domain.Teacher {
 	}
 	return m
 }
-
 func toClassMap(cs []domain.SchoolClass) map[int]domain.SchoolClass {
 	m := make(map[int]domain.SchoolClass, len(cs))
 	for _, c := range cs {
@@ -234,7 +322,6 @@ func toClassMap(cs []domain.SchoolClass) map[int]domain.SchoolClass {
 	}
 	return m
 }
-
 func toSubjMap(subs []domain.Subject) map[int]domain.Subject {
 	m := make(map[int]domain.Subject, len(subs))
 	for _, s := range subs {

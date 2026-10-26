@@ -459,32 +459,49 @@ $: rows = kind === "teacher"
                 const byKey = { teacher_id: {}, class_id: {}, room_id: {} };
                 for (const e of schedule) {
                         const key = e.day_of_week * 1000 + e.timeslot;
-                        for (const f of ["teacher_id", "room_id"]) {
+                        for (const f of ["teacher_id", "class_id", "room_id"]) {
                                 const v = e[f];
                                 if (!v) continue;
                                 (byKey[f][v + ":" + key] = byKey[f][v + ":" + key] || []).push(e);
                         }
-                        const rv = e.room_id;
-                        if (rv) (byKey.room_id[rv + ":" + key] = byKey.room_id[rv + ":" + key] || []).push(e);
                 }
-                const labels = { teacher_id: "Учитель", class_id: "Класс", room_id: "Кабинет" };
                 const conflicts = [];
-                // Классы: дубль = один и тот же класс дважды в слоте
-                // (родитель + подгруппа параллельно — законно).
-                for (const cv in byKey.class_id) {
-                        for (const key in byKey.class_id[cv]) {
-                                const arr = byKey.class_id[cv][key];
-                                if (arr.length > 1) {
-                                        const kk = Number(key.split(":")[1]);
-                                        const day = Math.floor(kk / 1000), slot = kk % 1000;
-                                        conflicts.push({
-                                                type: "Класс", day, slot,
-                                                items: arr.map((e) => ({
-                                                        subject: subjName(subjects, e.subject_id),
-                                                        who: className(classes, e.class_id)
-                                                }))
-                                        });
+                // Учитель и кабинет не могут вести/занимать два урока сразу.
+                // Для класса конфликтуют только повторные записи того же класса:
+                // родитель и его подгруппа могут заниматься параллельно.
+                const conflictTypes = [
+                        ["teacher_id", "Учитель", (e) => teachName(teachers, e.teacher_id)],
+                        ["room_id", "Кабинет", (e) => roomName(rooms, e.room_id)],
+                        ["class_id", "Класс", (e) => className(classes, e.class_id)],
+                ];
+                for (const [field, type, whoFor] of conflictTypes) {
+                        for (const entries of Object.values(byKey[field])) {
+                                let conflicting = entries;
+                                if (field === "room_id") {
+                                        // Параллельные половины одного класса могут делить кабинет.
+                                        const involved = new Set();
+                                        for (let i = 0; i < entries.length; i++) {
+                                                for (let j = i + 1; j < entries.length; j++) {
+                                                        const a = entries[i], b = entries[j];
+                                                        const bodyA = classBody(a.class_id), bodyB = classBody(b.class_id);
+                                                        if (!bodyA.includes(b.class_id) && !bodyB.includes(a.class_id)) {
+                                                                involved.add(a); involved.add(b);
+                                                        }
+                                                }
+                                        }
+                                        conflicting = [...involved];
                                 }
+                                if (conflicting.length < 2) continue;
+                                const first = conflicting[0];
+                                conflicts.push({
+                                        type,
+                                        day: first.day_of_week,
+                                        slot: first.timeslot,
+                                        items: conflicting.map((e) => ({
+                                                subject: subjName(subjects, e.subject_id),
+                                                who: whoFor(e),
+                                        })),
+                                });
                         }
                 }
                 const placedByLesson = {};

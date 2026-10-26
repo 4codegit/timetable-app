@@ -1,17 +1,19 @@
 package main
 
 import (
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
-	"timetable/internal/domain"
 )
 
 // buildSchoolsView — список школ на widget.NewList (виртуализация: плавный
 // скролл и один шаблон строки на все данные).
-func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
+func buildSchoolsView(store *db.Store, w fyne.Window, onChange func(preferredID int)) fyne.CanvasObject {
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder("Название школы")
 
@@ -54,9 +56,23 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				nameEd.Enable()
 				btnSave.SetText("Сохранить")
 				btnSave.OnTapped = func() {
-					if err := store.UpdateSchool(domain.School{ID: sc.ID, Name: nameEd.Text}); err != nil {
+					name := strings.TrimSpace(nameEd.Text)
+					if name == "" {
+						showError(w, "Введите название школы")
+						return
+					}
+					updated, err := store.GetSchool(sc.ID)
+					if err != nil {
+						showError(w, "Не удалось загрузить школу: "+err.Error())
+						return
+					}
+					updated.Name = name
+					if err := store.UpdateSchool(*updated); err != nil {
 						showError(w, "Ошибка: "+err.Error())
 						return
+					}
+					if onChange != nil {
+						onChange(sc.ID)
 					}
 					nameEd.Disable()
 					btnSave.SetText("Изменить")
@@ -64,25 +80,37 @@ func buildSchoolsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			}
 
 			btnDel.OnTapped = func() {
-				if err := store.DeleteSchool(sc.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				list.Refresh()
+				dialog.NewConfirm("Удалить школу?", "Будут удалены все её справочники, уроки и расписание.", func(ok bool) {
+					if !ok {
+						return
+					}
+					if err := store.DeleteSchool(sc.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					if onChange != nil {
+						onChange(0)
+					}
+					list.Refresh()
+				}, w).Show()
 			}
 		},
 	)
 
 	addBtn := widget.NewButton("Добавить школу", func() {
-		if nameEntry.Text == "" {
+		if strings.TrimSpace(nameEntry.Text) == "" {
 			showError(w, "Введите название школы")
 			return
 		}
-		if _, err := store.CreateSchool(nameEntry.Text); err != nil {
+		sc, err := store.CreateSchool(strings.TrimSpace(nameEntry.Text))
+		if err != nil {
 			showError(w, "Ошибка: "+err.Error())
 			return
 		}
 		nameEntry.SetText("")
+		if onChange != nil {
+			onChange(sc.ID)
+		}
 		list.Refresh()
 	})
 	addBtn.Importance = widget.HighImportance

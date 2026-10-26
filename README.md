@@ -36,3 +36,30 @@ GOCACHE=/tmp/timetable-go-cache go test ./...
 
 Для запуска в режиме разработки используйте `wails dev`; для production-сборки
 — `wails build`.
+
+## Версия на Fyne
+
+Альтернативный нативный интерфейс находится в `cmd/fyne`. Для больших расписаний
+собирайте его с OR-Tools CP-SAT: исходники решателя сохранены в
+`internal/solver/ortools_csat.go` и `internal/solver/ortools_csat_windows.go`.
+Сборка без `-tags ortools` включает только стандартный Go-решатель.
+
+```sh
+# Linux: подготовить OR-Tools (один раз на машине)
+./scripts/build_ortools.sh
+
+# Запуск с CP-SAT
+LD_LIBRARY_PATH="$PWD/third_party/ortools/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" go run -tags ortools ./cmd/fyne
+
+# Собрать приложение с CP-SAT и положить рядом динамическую библиотеку
+go build -tags ortools -o timetable-fyne ./cmd/fyne
+cp -L third_party/ortools/lib/libortools.so* .
+```
+
+На Windows используйте `scripts/build_ortools_windows.sh`, соберите с
+`-tags ortools` и разместите `ortools_csat.dll` рядом с приложением. В разделе
+«Генерация» Fyne показывает, включён ли CP-SAT в запущенной сборке.
+
+Приложение использует общую с основной версией SQLite-схему, генератор, модели
+и PDF-рендерер. База хранится рядом с исполняемым файлом, если эта папка
+доступна для записи; иначе — в каталоге пользовательских настроек приложения.

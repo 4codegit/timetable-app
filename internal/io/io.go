@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"timetable/internal/db"
@@ -309,6 +310,18 @@ func orDefaultStr(v, def string) string {
 
 // ScheduleCSV renders entries as a week×timeslot CSV keyed by class.
 func ScheduleCSV(entries []domain.ScheduleEntry, classes map[int]domain.SchoolClass, teachers map[int]domain.Teacher, subjects map[int]domain.Subject, rooms map[int]domain.Room, days, slots int) (string, error) {
+	if days < 0 {
+		days = 0
+	}
+	dayIndexes := make([]int, days)
+	for d := range dayIndexes {
+		dayIndexes[d] = d
+	}
+	return ScheduleCSVForDays(entries, classes, teachers, subjects, rooms, slots, dayIndexes)
+}
+
+// ScheduleCSVForDays exports the selected weekdays in the requested order.
+func ScheduleCSVForDays(entries []domain.ScheduleEntry, classes map[int]domain.SchoolClass, teachers map[int]domain.Teacher, subjects map[int]domain.Subject, rooms map[int]domain.Room, slots int, dayIndexes []int) (string, error) {
 	var b strings.Builder
 	w := csv.NewWriter(&b)
 
@@ -349,8 +362,20 @@ func ScheduleCSV(entries []domain.ScheduleEntry, classes map[int]domain.SchoolCl
 		grid[e.ClassID][e.DayOfWeek][e.Timeslot] = fmt.Sprintf("%s (%s) %s", subj, teach, room)
 	}
 
-	for cid, c := range classes {
-		for d := 0; d < days; d++ {
+	classIDs := make([]int, 0, len(classes))
+	for cid := range classes {
+		classIDs = append(classIDs, cid)
+	}
+	sort.Slice(classIDs, func(i, j int) bool {
+		a, b := classes[classIDs[i]], classes[classIDs[j]]
+		if strings.EqualFold(a.Name, b.Name) {
+			return a.ID < b.ID
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+	for _, cid := range classIDs {
+		c := classes[cid]
+		for _, d := range dayIndexes {
 			row := []string{c.Name + " " + dayName(dayNames, d)}
 			for s := 0; s < slots; s++ {
 				row = append(row, grid[cid][d][s])

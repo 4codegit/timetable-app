@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"timetable/internal/db"
@@ -15,20 +18,6 @@ import (
 // активная вкладка растягивается на всё окно, а внутри каждой —
 // виртуализованный widget.NewList, который скроллится сам.
 func buildRefsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
-	schoolSelect := widget.NewSelect([]string{}, func(s string) {
-		schools, err := store.ListSchools()
-		if err != nil {
-			return
-		}
-		for _, sc := range schools {
-			if sc.Name == s {
-				setActiveSchoolID(sc.ID)
-				break
-			}
-		}
-	})
-	refreshSchoolsSelect(store, schoolSelect)
-
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Учителя", buildTeachersView(store, w)),
 		container.NewTabItem("Предметы", buildSubjectsView(store, w)),
@@ -42,33 +31,10 @@ func buildRefsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		container.NewVBox(
 			widget.NewLabelWithStyle("Справочники", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			widget.NewSeparator(),
-			container.NewBorder(
-				nil, nil,
-				widget.NewLabel("Школа:"), nil,
-				schoolSelect,
-			),
-			widget.NewSeparator(),
 		),
 		nil, nil, nil,
 		tabs,
 	)
-}
-
-func refreshSchoolsSelect(store *db.Store, selectWidget *widget.Select) {
-	schools, err := store.ListSchools()
-	if err != nil {
-		return
-	}
-	var names []string
-	for _, sc := range schools {
-		names = append(names, sc.Name)
-	}
-	selectWidget.Options = names
-	if len(names) > 0 && selectWidget.Selected == "" {
-		selectWidget.Selected = names[0]
-		selectWidget.Refresh()
-		setActiveSchoolID(schools[0].ID)
-	}
 }
 
 // ---------- Учителя ----------
@@ -136,11 +102,16 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			}
 
 			btnDel.OnTapped = func() {
-				if err := store.DeleteTeacher(t.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				list.Refresh()
+				dialog.NewConfirm("Удалить учителя?", "Связанные уроки и записи расписания тоже будут удалены.", func(ok bool) {
+					if !ok {
+						return
+					}
+					if err := store.DeleteTeacher(t.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					list.Refresh()
+				}, w).Show()
 			}
 		},
 	)
@@ -194,13 +165,15 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		func() fyne.CanvasObject {
 			nameEd := widget.NewEntry()
 			shortEd := widget.NewEntry()
+			roomTypeEd := widget.NewEntry()
+			roomTypeEd.SetPlaceHolder("тип кабинета / any")
 			btnSave := widget.NewButton("Изменить", nil)
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
 			return container.NewBorder(
 				nil, nil,
-				container.NewHBox(nameEd, shortEd), nil,
+				container.NewHBox(nameEd, shortEd, roomTypeEd), nil,
 				container.NewHBox(btnSave, btnDel),
 			)
 		},
@@ -218,35 +191,49 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			btns := box.Objects[1].(*fyne.Container)
 			nameEd := fields.Objects[0].(*widget.Entry)
 			shortEd := fields.Objects[1].(*widget.Entry)
+			roomTypeEd := fields.Objects[2].(*widget.Entry)
 			btnSave := btns.Objects[0].(*widget.Button)
 			btnDel := btns.Objects[1].(*widget.Button)
 
 			nameEd.SetText(s.Name)
 			shortEd.SetText(s.ShortName)
+			roomTypeEd.SetText(s.RequiresRoomType)
 			nameEd.Disable()
 			shortEd.Disable()
+			roomTypeEd.Disable()
 			btnSave.SetText("Изменить")
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
 				shortEd.Enable()
+				roomTypeEd.Enable()
 				btnSave.SetText("Сохранить")
 				btnSave.OnTapped = func() {
-					if err := store.UpdateSubject(domain.Subject{ID: s.ID, Name: nameEd.Text, ShortName: shortEd.Text}); err != nil {
+					if strings.TrimSpace(nameEd.Text) == "" {
+						showError(w, "Укажите название предмета")
+						return
+					}
+					if err := store.UpdateSubject(domain.Subject{ID: s.ID, SchoolID: s.SchoolID, Name: strings.TrimSpace(nameEd.Text), ShortName: strings.TrimSpace(shortEd.Text), RequiresRoomType: strings.TrimSpace(roomTypeEd.Text)}); err != nil {
 						showError(w, "Ошибка: "+err.Error())
 						return
 					}
 					nameEd.Disable()
 					shortEd.Disable()
+					roomTypeEd.Disable()
 					btnSave.SetText("Изменить")
 				}
 			}
 
 			btnDel.OnTapped = func() {
-				if err := store.DeleteSubject(s.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				list.Refresh()
+				dialog.NewConfirm("Удалить предмет?", "Связанные уроки и записи расписания тоже будут удалены.", func(ok bool) {
+					if !ok {
+						return
+					}
+					if err := store.DeleteSubject(s.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					list.Refresh()
+				}, w).Show()
 			}
 		},
 	)
@@ -255,18 +242,22 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	nameEd.SetPlaceHolder("Название предмета")
 	shortEd := widget.NewEntry()
 	shortEd.SetPlaceHolder("Кратко")
+	roomTypeEd := widget.NewEntry()
+	roomTypeEd.SetText("any")
+	roomTypeEd.SetPlaceHolder("тип кабинета / any")
 
 	addBtn := widget.NewButton("Добавить предмет", func() {
-		if activeSchoolID == 0 || nameEd.Text == "" {
+		if activeSchoolID == 0 || strings.TrimSpace(nameEd.Text) == "" {
 			showError(w, "Выберите школу и введите название")
 			return
 		}
-		if _, err := store.CreateSubject(domain.Subject{SchoolID: activeSchoolID, Name: nameEd.Text, ShortName: shortEd.Text}); err != nil {
+		if _, err := store.CreateSubject(domain.Subject{SchoolID: activeSchoolID, Name: strings.TrimSpace(nameEd.Text), ShortName: strings.TrimSpace(shortEd.Text), RequiresRoomType: strings.TrimSpace(roomTypeEd.Text)}); err != nil {
 			showError(w, "Ошибка: "+err.Error())
 			return
 		}
 		nameEd.SetText("")
 		shortEd.SetText("")
+		roomTypeEd.SetText("any")
 		list.Refresh()
 	})
 	addBtn.Importance = widget.HighImportance
@@ -275,7 +266,7 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		container.NewVBox(
 			container.NewBorder(
 				nil, nil,
-				container.NewHBox(nameEd, shortEd), nil,
+				container.NewHBox(nameEd, shortEd, roomTypeEd), nil,
 				addBtn,
 			),
 			widget.NewSeparator(),
@@ -288,6 +279,30 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 // ---------- Классы ----------
 
 func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
+	roomOptions := []string{"Без кабинета"}
+	roomIDs := map[string]int{"Без кабинета": 0}
+	if rooms, err := store.ListRooms(activeSchoolID); err == nil {
+		for _, room := range rooms {
+			label := fmt.Sprintf("%s (#%d)", room.Name, room.ID)
+			roomOptions = append(roomOptions, label)
+			roomIDs[label] = room.ID
+		}
+	}
+	parentOptions := []string{"Обычный класс"}
+	parentIDs := map[string]int{"Обычный класс": 0}
+	if existing, err := store.ListClasses(activeSchoolID); err == nil {
+		for _, parent := range existing {
+			if parent.SubgroupOf == nil {
+				label := fmt.Sprintf("Подгруппа класса %s (#%d)", parent.Name, parent.ID)
+				parentOptions = append(parentOptions, label)
+				parentIDs[label] = parent.ID
+			}
+		}
+	}
+	roomSelect := widget.NewSelect(roomOptions, nil)
+	roomSelect.SetSelected(roomOptions[0])
+	parentSelect := widget.NewSelect(parentOptions, nil)
+	parentSelect.SetSelected(parentOptions[0])
 	var list *widget.List
 	list = widget.NewList(
 		func() int {
@@ -299,13 +314,15 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		},
 		func() fyne.CanvasObject {
 			nameEd := widget.NewEntry()
+			roomEd := widget.NewSelect([]string{}, nil)
+			parentEd := widget.NewSelect([]string{}, nil)
 			btnSave := widget.NewButton("Изменить", nil)
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
 			return container.NewBorder(
 				nil, nil,
-				nameEd, nil,
+				container.NewHBox(nameEd, roomEd, parentEd), nil,
 				container.NewHBox(btnSave, btnDel),
 			)
 		},
@@ -318,34 +335,101 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				return
 			}
 			c := classes[i]
+			rooms, _ := store.ListRooms(activeSchoolID)
 			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
+			fields := box.Objects[0].(*fyne.Container)
+			nameEd := fields.Objects[0].(*widget.Entry)
+			roomEd := fields.Objects[1].(*widget.Select)
+			parentEd := fields.Objects[2].(*widget.Select)
 			btns := box.Objects[1].(*fyne.Container)
 			btnSave := btns.Objects[0].(*widget.Button)
 			btnDel := btns.Objects[1].(*widget.Button)
 
 			nameEd.SetText(c.Name)
+			roomIDs := map[string]int{"Без кабинета": 0}
+			roomOpts := []string{"Без кабинета"}
+			for _, room := range rooms {
+				label := fmt.Sprintf("%s (#%d)", room.Name, room.ID)
+				roomOpts = append(roomOpts, label)
+				roomIDs[label] = room.ID
+			}
+			roomEd.Options = roomOpts
+			roomEd.SetSelected("Без кабинета")
+			for label, id := range roomIDs {
+				if id == c.RoomID {
+					roomEd.SetSelected(label)
+					break
+				}
+			}
+			parentOpts := []string{"Обычный класс"}
+			parentIDs := map[string]int{"Обычный класс": 0}
+			hasChildren := false
+			for _, child := range classes {
+				if child.SubgroupOf != nil && *child.SubgroupOf == c.ID {
+					hasChildren = true
+					break
+				}
+			}
+			for _, candidate := range classes {
+				if candidate.SubgroupOf != nil || candidate.ID == c.ID || hasChildren {
+					continue
+				}
+				label := fmt.Sprintf("Подгруппа класса %s (#%d)", candidate.Name, candidate.ID)
+				parentOpts = append(parentOpts, label)
+				parentIDs[label] = candidate.ID
+			}
+			parentEd.Options = parentOpts
+			parentEd.SetSelected(parentOpts[0])
+			if c.SubgroupOf != nil {
+				for label, id := range parentIDs {
+					if id == *c.SubgroupOf {
+						parentEd.SetSelected(label)
+						break
+					}
+				}
+			}
+			roomEd.Refresh()
+			parentEd.Refresh()
 			nameEd.Disable()
+			roomEd.Disable()
+			parentEd.Disable()
 			btnSave.SetText("Изменить")
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
+				roomEd.Enable()
+				parentEd.Enable()
 				btnSave.SetText("Сохранить")
 				btnSave.OnTapped = func() {
-					if err := store.UpdateClass(domain.SchoolClass{ID: c.ID, Name: nameEd.Text}); err != nil {
+					if strings.TrimSpace(nameEd.Text) == "" {
+						showError(w, "Укажите название класса")
+						return
+					}
+					updated := domain.SchoolClass{ID: c.ID, SchoolID: c.SchoolID, Name: strings.TrimSpace(nameEd.Text), RoomID: roomIDs[roomEd.Selected]}
+					if parentID := parentIDs[parentEd.Selected]; parentID != 0 {
+						updated.SubgroupOf = &parentID
+					}
+					if err := store.UpdateClass(updated); err != nil {
 						showError(w, "Ошибка: "+err.Error())
 						return
 					}
 					nameEd.Disable()
+					roomEd.Disable()
+					parentEd.Disable()
 					btnSave.SetText("Изменить")
 				}
 			}
 
 			btnDel.OnTapped = func() {
-				if err := store.DeleteClass(c.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				list.Refresh()
+				dialog.NewConfirm("Удалить класс?", "Уроки, подгруппы и записи расписания этого класса будут удалены.", func(ok bool) {
+					if !ok {
+						return
+					}
+					if err := store.DeleteClass(c.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					list.Refresh()
+				}, w).Show()
 			}
 		},
 	)
@@ -354,15 +438,21 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	nameEd.SetPlaceHolder("Название класса (например, 10А)")
 
 	addBtn := widget.NewButton("Добавить класс", func() {
-		if activeSchoolID == 0 || nameEd.Text == "" {
+		if activeSchoolID == 0 || strings.TrimSpace(nameEd.Text) == "" {
 			showError(w, "Выберите школу и введите название класса")
 			return
 		}
-		if _, err := store.CreateClass(domain.SchoolClass{SchoolID: activeSchoolID, Name: nameEd.Text}); err != nil {
+		class := domain.SchoolClass{SchoolID: activeSchoolID, Name: strings.TrimSpace(nameEd.Text), RoomID: roomIDs[roomSelect.Selected]}
+		if parentID := parentIDs[parentSelect.Selected]; parentID != 0 {
+			class.SubgroupOf = &parentID
+		}
+		if _, err := store.CreateClass(class); err != nil {
 			showError(w, "Ошибка: "+err.Error())
 			return
 		}
 		nameEd.SetText("")
+		roomSelect.SetSelected(roomOptions[0])
+		parentSelect.SetSelected(parentOptions[0])
 		list.Refresh()
 	})
 	addBtn.Importance = widget.HighImportance
@@ -371,7 +461,7 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		container.NewVBox(
 			container.NewBorder(
 				nil, nil,
-				nameEd, nil,
+				container.NewHBox(nameEd, roomSelect, parentSelect), nil,
 				addBtn,
 			),
 			widget.NewSeparator(),
@@ -395,13 +485,15 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		},
 		func() fyne.CanvasObject {
 			nameEd := widget.NewEntry()
+			roomTypeEd := widget.NewEntry()
+			roomTypeEd.SetPlaceHolder("тип / any")
 			btnSave := widget.NewButton("Изменить", nil)
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
 			return container.NewBorder(
 				nil, nil,
-				nameEd, nil,
+				container.NewHBox(nameEd, roomTypeEd), nil,
 				container.NewHBox(btnSave, btnDel),
 			)
 		},
@@ -415,50 +507,69 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			}
 			r := rooms[i]
 			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
+			fields := box.Objects[0].(*fyne.Container)
+			nameEd := fields.Objects[0].(*widget.Entry)
+			roomTypeEd := fields.Objects[1].(*widget.Entry)
 			btns := box.Objects[1].(*fyne.Container)
 			btnSave := btns.Objects[0].(*widget.Button)
 			btnDel := btns.Objects[1].(*widget.Button)
 
 			nameEd.SetText(r.Name)
+			roomTypeEd.SetText(r.RoomType)
 			nameEd.Disable()
+			roomTypeEd.Disable()
 			btnSave.SetText("Изменить")
 			btnSave.OnTapped = func() {
 				nameEd.Enable()
+				roomTypeEd.Enable()
 				btnSave.SetText("Сохранить")
 				btnSave.OnTapped = func() {
-					if err := store.UpdateRoom(domain.Room{ID: r.ID, Name: nameEd.Text}); err != nil {
+					if strings.TrimSpace(nameEd.Text) == "" {
+						showError(w, "Укажите название кабинета")
+						return
+					}
+					if err := store.UpdateRoom(domain.Room{ID: r.ID, SchoolID: r.SchoolID, Name: strings.TrimSpace(nameEd.Text), RoomType: strings.TrimSpace(roomTypeEd.Text)}); err != nil {
 						showError(w, "Ошибка: "+err.Error())
 						return
 					}
 					nameEd.Disable()
+					roomTypeEd.Disable()
 					btnSave.SetText("Изменить")
 				}
 			}
 
 			btnDel.OnTapped = func() {
-				if err := store.DeleteRoom(r.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
-					return
-				}
-				list.Refresh()
+				dialog.NewConfirm("Удалить кабинет?", "Связанные записи расписания будут удалены.", func(ok bool) {
+					if !ok {
+						return
+					}
+					if err := store.DeleteRoom(r.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					list.Refresh()
+				}, w).Show()
 			}
 		},
 	)
 
 	nameEd := widget.NewEntry()
 	nameEd.SetPlaceHolder("Название кабинета")
+	roomTypeEd := widget.NewEntry()
+	roomTypeEd.SetText("any")
+	roomTypeEd.SetPlaceHolder("тип / any")
 
 	addBtn := widget.NewButton("Добавить кабинет", func() {
-		if activeSchoolID == 0 || nameEd.Text == "" {
+		if activeSchoolID == 0 || strings.TrimSpace(nameEd.Text) == "" {
 			showError(w, "Выберите школу и введите название кабинета")
 			return
 		}
-		if _, err := store.CreateRoom(domain.Room{SchoolID: activeSchoolID, Name: nameEd.Text}); err != nil {
+		if _, err := store.CreateRoom(domain.Room{SchoolID: activeSchoolID, Name: strings.TrimSpace(nameEd.Text), RoomType: strings.TrimSpace(roomTypeEd.Text)}); err != nil {
 			showError(w, "Ошибка: "+err.Error())
 			return
 		}
 		nameEd.SetText("")
+		roomTypeEd.SetText("any")
 		list.Refresh()
 	})
 	addBtn.Importance = widget.HighImportance
@@ -467,7 +578,7 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		container.NewVBox(
 			container.NewBorder(
 				nil, nil,
-				nameEd, nil,
+				container.NewHBox(nameEd, roomTypeEd), nil,
 				addBtn,
 			),
 			widget.NewSeparator(),
@@ -480,6 +591,7 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 // ---------- Уроки ----------
 
 func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
+	schoolID := activeSchoolID
 	var classes []domain.SchoolClass
 	var subjects []domain.Subject
 	var teachers []domain.Teacher
@@ -503,30 +615,40 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	classSelect := widget.NewSelect([]string{}, func(string) {})
 	subjectSelect := widget.NewSelect([]string{}, func(string) {})
 	teacherSelect := widget.NewSelect([]string{}, func(string) {})
+	classIDs, subjectIDs, teacherIDs := map[string]int{}, map[string]int{}, map[string]int{}
 	hoursEd := widget.NewEntry()
 	hoursEd.SetPlaceHolder("Часов/нед")
 
 	loadRefs()
 	updateSelects := func() {
+		classIDs = make(map[string]int, len(classes))
 		classOpts := make([]string, 0, len(classes))
 		for _, c := range classes {
-			classOpts = append(classOpts, c.Name)
+			label := fmt.Sprintf("%s (#%d)", c.Name, c.ID)
+			classOpts = append(classOpts, label)
+			classIDs[label] = c.ID
 		}
 		classSelect.Options = classOpts
 		if len(classOpts) > 0 {
 			classSelect.Selected = classOpts[0]
 		}
+		subjectIDs = make(map[string]int, len(subjects))
 		subjOpts := make([]string, 0, len(subjects))
 		for _, s := range subjects {
-			subjOpts = append(subjOpts, s.Name)
+			label := fmt.Sprintf("%s (#%d)", s.Name, s.ID)
+			subjOpts = append(subjOpts, label)
+			subjectIDs[label] = s.ID
 		}
 		subjectSelect.Options = subjOpts
 		if len(subjOpts) > 0 {
 			subjectSelect.Selected = subjOpts[0]
 		}
+		teacherIDs = make(map[string]int, len(teachers))
 		teachOpts := make([]string, 0, len(teachers))
 		for _, t := range teachers {
-			teachOpts = append(teachOpts, t.Name)
+			label := fmt.Sprintf("%s (#%d)", t.Name, t.ID)
+			teachOpts = append(teachOpts, label)
+			teacherIDs[label] = t.ID
 		}
 		teacherSelect.Options = teachOpts
 		if len(teachOpts) > 0 {
@@ -538,50 +660,91 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	var list *widget.List
 	list = widget.NewList(
 		func() int {
-			if activeSchoolID == 0 {
+			if schoolID == 0 {
 				return 0
 			}
-			lessons, _ := store.ListLessons(activeSchoolID)
+			lessons, _ := store.ListLessons(schoolID)
 			return len(lessons)
 		},
 		func() fyne.CanvasObject {
-			nameEd := widget.NewEntry()
+			nameEd := widget.NewLabel("")
+			hoursInput := widget.NewEntry()
+			hoursInput.SetPlaceHolder("ч/нед")
+			btnSave := widget.NewButton("Сохранить", nil)
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				nameEd, nil,
-				btnDel,
-			)
+			return container.NewBorder(nil, nil, container.NewHBox(nameEd, hoursInput), nil, container.NewHBox(btnSave, btnDel))
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
-			if activeSchoolID == 0 {
+			if schoolID == 0 {
 				return
 			}
-			lessons, err := store.ListLessons(activeSchoolID)
+			lessons, err := store.ListLessons(schoolID)
 			if err != nil || i >= len(lessons) {
 				return
 			}
 			l := lessons[i]
 			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
-			btnDel := box.Objects[1].(*widget.Button)
-
-			nameEd.SetText(fmt.Sprintf("ID %d: %s → %s, %d ч/нед", l.ID, getClassName(classes, l.ClassID), getSubjName(subjects, l.SubjectID), l.HoursPerWeek))
-			nameEd.Disable()
-
-			btnDel.OnTapped = func() {
-				if err := store.DeleteLesson(l.ID); err != nil {
-					showError(w, "Ошибка: "+err.Error())
+			fields := box.Objects[0].(*fyne.Container)
+			buttons := box.Objects[1].(*fyne.Container)
+			nameEd := fields.Objects[0].(*widget.Label)
+			hoursInput := fields.Objects[1].(*widget.Entry)
+			btnSave := buttons.Objects[0].(*widget.Button)
+			btnDel := buttons.Objects[1].(*widget.Button)
+			nameEd.SetText(fmt.Sprintf("%s → %s · %s", getClassName(classes, l.ClassID), getSubjName(subjects, l.SubjectID), getTeacherName(teachers, l.TeacherID)))
+			hoursInput.SetText(fmt.Sprintf("%d", l.HoursPerWeek))
+			btnSave.OnTapped = func() {
+				hours, err := strconv.Atoi(strings.TrimSpace(hoursInput.Text))
+				if err != nil || hours < 1 || hours > 40 {
+					showError(w, "Часов в неделю должно быть от 1 до 40")
+					return
+				}
+				err = store.WithTx(func(tx *db.Store) error {
+					if err := tx.UpdateLesson(domain.Lesson{ID: l.ID, SchoolID: schoolID, ClassID: l.ClassID, SubjectID: l.SubjectID, TeacherID: l.TeacherID, HoursPerWeek: hours}); err != nil {
+						return err
+					}
+					if hours >= l.HoursPerWeek {
+						return nil
+					}
+					entries, err := tx.ListSchedule(schoolID)
+					if err != nil {
+						return err
+					}
+					kept, count := make([]domain.ScheduleEntry, 0, len(entries)), 0
+					for _, e := range entries {
+						if e.LessonID != l.ID || count < hours {
+							kept = append(kept, e)
+							if e.LessonID == l.ID {
+								count++
+							}
+						}
+					}
+					return tx.ReplaceSchedule(schoolID, kept)
+				})
+				if err != nil {
+					showError(w, "Не удалось обновить урок: "+err.Error())
 					return
 				}
 				list.Refresh()
+			}
+
+			btnDel.OnTapped = func() {
+				dialog.NewConfirm("Удалить урок из учебного плана?", "Урок и все его записи в расписании будут удалены.", func(ok bool) {
+					if !ok {
+						return
+					}
+					if err := store.DeleteLesson(l.ID); err != nil {
+						showError(w, "Ошибка: "+err.Error())
+						return
+					}
+					list.Refresh()
+				}, w).Show()
 			}
 		},
 	)
 
 	addBtn := widget.NewButton("Добавить урок", func() {
-		if activeSchoolID == 0 || classSelect.Selected == "" || subjectSelect.Selected == "" || teacherSelect.Selected == "" {
+		if schoolID == 0 || classSelect.Selected == "" || subjectSelect.Selected == "" || teacherSelect.Selected == "" {
 			showError(w, "Выберите все поля")
 			return
 		}
@@ -590,26 +753,12 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		if hours < 1 {
 			hours = 1
 		}
-		var classID, subjectID, teacherID int
-		for _, c := range classes {
-			if c.Name == classSelect.Selected {
-				classID = c.ID
-				break
-			}
+		classID, subjectID, teacherID := classIDs[classSelect.Selected], subjectIDs[subjectSelect.Selected], teacherIDs[teacherSelect.Selected]
+		if classID == 0 || subjectID == 0 || teacherID == 0 {
+			showError(w, "Не удалось определить класс, предмет или учителя")
+			return
 		}
-		for _, s := range subjects {
-			if s.Name == subjectSelect.Selected {
-				subjectID = s.ID
-				break
-			}
-		}
-		for _, t := range teachers {
-			if t.Name == teacherSelect.Selected {
-				teacherID = t.ID
-				break
-			}
-		}
-		if _, err := store.CreateLesson(domain.Lesson{SchoolID: activeSchoolID, ClassID: classID, SubjectID: subjectID, TeacherID: teacherID, HoursPerWeek: hours}); err != nil {
+		if _, err := store.CreateLesson(domain.Lesson{SchoolID: schoolID, ClassID: classID, SubjectID: subjectID, TeacherID: teacherID, HoursPerWeek: hours}); err != nil {
 			showError(w, "Ошибка: "+err.Error())
 			return
 		}
@@ -645,6 +794,18 @@ func getSubjName(subjects []domain.Subject, id int) string {
 	for _, s := range subjects {
 		if s.ID == id {
 			return s.Name
+		}
+	}
+	return "?"
+}
+
+func getTeacherName(teachers []domain.Teacher, id int) string {
+	for _, t := range teachers {
+		if t.ID == id {
+			if t.ShortName != "" {
+				return t.ShortName
+			}
+			return t.Name
 		}
 	}
 	return "?"

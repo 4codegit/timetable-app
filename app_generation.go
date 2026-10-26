@@ -17,11 +17,11 @@ type generationState struct {
 }
 
 type GenProgress struct {
-	ID      int64  `json:"id"`
-	Placed  int    `json:"placed"`
-	Total   int    `json:"total"`
-	Status  string `json:"status"`
-	Error   string `json:"error,omitempty"`
+	ID     int64  `json:"id"`
+	Placed int    `json:"placed"`
+	Total  int    `json:"total"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
 }
 
 var genState = &generationState{
@@ -77,6 +77,12 @@ func (a *App) StartPreciseGeneration(schoolID, days, slots, daysMask, solveTimeo
 	timeout := time.Duration(solveTimeoutSec) * time.Second
 	if timeout <= 0 {
 		timeout = 0 // без лимита — solver работает до завершения
+	}
+	// The pure-Go fallback has no cancellation control in the Wails UI. If a
+	// large school auto-selects this path with "no limit", keep it bounded so
+	// an incomplete instance cannot run forever in the background.
+	if !solver.HasPreciseSolver() && timeout == 0 {
+		timeout = 30 * time.Second
 	}
 
 	id := genState.newID()

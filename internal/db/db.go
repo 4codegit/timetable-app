@@ -43,9 +43,18 @@ func New(path string) (*Store, error) {
 	}
 	s := &Store{db: d, root: d}
 	if err := s.migrate(); err != nil {
+		_ = d.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+// Close releases the underlying SQLite connection pool.
+func (s *Store) Close() error {
+	if s == nil || s.root == nil {
+		return nil
+	}
+	return s.root.Close()
 }
 
 func (s *Store) migrate() error {
@@ -55,7 +64,7 @@ func (s *Store) migrate() error {
 			name TEXT NOT NULL,
 			settings_json TEXT NOT NULL DEFAULT '{}'
 		)`,
-			`CREATE TABLE IF NOT EXISTS teachers (
+		`CREATE TABLE IF NOT EXISTS teachers (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
 				name TEXT NOT NULL,
@@ -193,7 +202,7 @@ func (s *Store) migrate() error {
 			 school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
 				name TEXT NOT NULL,
 				short_name TEXT`,
-				`INSERT INTO teachers_new SELECT id, school_id, name, short_name FROM teachers`); err != nil {
+			`INSERT INTO teachers_new SELECT id, school_id, name, short_name FROM teachers`); err != nil {
 			return err
 		}
 	}
@@ -347,7 +356,7 @@ func (s *Store) ListTeachers(schoolID int) ([]domain.Teacher, error) {
 	var out []domain.Teacher
 	for rows.Next() {
 		var t domain.Teacher
-			if err := rows.Scan(&t.ID, &t.SchoolID, &t.Name, &t.ShortName); err != nil {
+		if err := rows.Scan(&t.ID, &t.SchoolID, &t.Name, &t.ShortName); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

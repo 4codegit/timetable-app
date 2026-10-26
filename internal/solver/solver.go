@@ -158,17 +158,17 @@ func runRestarts(ctx context.Context, env searchEnv, rng *rand.Rand) Result {
 	best := Result{Total: len(env.occ)}
 	deadline, _ := ctx.Deadline()
 	for {
-		if time.Now().After(deadline) {
+		if ctx.Err() != nil || !deadline.IsZero() && time.Now().After(deadline) {
 			break
 		}
 		// Короткие попытки: на большой школе один перебор может съесть
 		// весь дедлайн — ограничиваем 5 секундами, чтобы рестарты
 		// продолжались и лучшее частичное решение накапливалось.
 		attemptDl := time.Now().Add(5 * time.Second)
-		if attemptDl.After(deadline) {
+		if !deadline.IsZero() && attemptDl.After(deadline) {
 			attemptDl = deadline
 		}
-		r := backtrackDl(env, rng, attemptDl)
+		r := backtrackDl(ctx, env, rng, attemptDl)
 		if r.Placed > best.Placed || (r.Placed == best.Placed && r.Violations < best.Violations) {
 			best = r
 		}
@@ -577,7 +577,7 @@ func denseClassSets(cs classSets, cPos map[int]int, stride int) (classSetsIdx, b
 // Занятость — ПЛОСКИЕ массивы (сущность×days×slots): индекс ячейки =
 // сущность*stride + day*slots + slot. Профиль старого перебора показывал
 // до 52% времени в map-lookup-ах занятости; здесь их нет вовсе.
-func backtrackDl(env searchEnv, rng *rand.Rand, deadline time.Time) Result {
+func backtrackDl(ctx context.Context, env searchEnv, rng *rand.Rand, deadline time.Time) Result {
 	in, occ := env.in, env.occ
 	days, slots, stride := env.days, env.slots, env.stride
 
@@ -598,9 +598,11 @@ func backtrackDl(env searchEnv, rng *rand.Rand, deadline time.Time) Result {
 		if aborted {
 			return false
 		}
-		if nodes++; nodes&4095 == 0 && !deadline.IsZero() && time.Now().After(deadline) {
-			aborted = true
-			return false
+		if nodes++; nodes&255 == 0 {
+			if ctx.Err() != nil || !deadline.IsZero() && time.Now().After(deadline) {
+				aborted = true
+				return false
+			}
 		}
 		if k == len(env.order) {
 			entries := buildEntries(in, assign, occ)
