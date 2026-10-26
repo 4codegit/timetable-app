@@ -31,7 +31,7 @@ func defaultPeriods(n int) []period {
 }
 
 func formatTime(minutes int) string {
-	return format2(minutes / 60) + ":" + format2(minutes%60)
+	return format2(minutes/60) + ":" + format2(minutes%60)
 }
 
 func format2(n int) string {
