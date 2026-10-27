@@ -24,6 +24,29 @@ jobs:
       - name: Go test
         run: go test -v -race ./...
 
+  test-ortools:
+    name: Go Tests (OR-Tools CP-SAT)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install CGO dependencies (sqlite3 + C++ binding)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ libc6-dev
+      - name: Build OR-Tools C++ binding
+        run: bash scripts/build_ortools.sh
+      - name: Go vet (ortools)
+        run: go vet -tags ortools ./...
+      - name: Go test (ortools)
+        run: go test -v -race -tags ortools ./...
+        env:
+          # Тестовый бинарник живёт вне дерева репозитория, rpath $ORIGIN
+          # не покрывает его — библиотеку указываем явно.
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ortools/lib
+
   test-frontend:
     name: Frontend Build
     runs-on: ubuntu-latest

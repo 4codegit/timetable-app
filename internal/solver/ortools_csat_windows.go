@@ -159,7 +159,13 @@ func ortoolsSolve(in SolveInput, parallelism int, timeout time.Duration) (Result
 	if workers <= 0 {
 		workers = int32(runtime.NumCPU())
 	}
+	// timeout == 0 («без лимита») нельзя передавать как 0 мс: CP-SAT с
+	// set_max_time_in_seconds(0.0) отвечает мгновенно пустым решением.
+	// Переводим в сентинел 24 часа.
 	tlim := int32(timeout.Milliseconds())
+	if timeout <= 0 {
+		tlim = 24 * 60 * 60 * 1000
+	}
 
 	// Выходные буферы выделяет Go, C в них только пишет: нет ручного free
 	// и нет конверсии uintptr → unsafe.Pointer (результат из DLL).
@@ -213,7 +219,6 @@ func ortoolsSolve(in SolveInput, parallelism int, timeout time.Duration) (Result
 		if outDay[i] < 0 {
 			continue // урок не удалось разместить (перегруженная школа)
 		}
-		placed++
 		// bind.cpp отдаёт ИНДЕКС урока в in.Lessons. Проверка границ
 		// обязательна: без неё неожиданное значение из DLL валит exe
 		// паникой (index out of range) вместо пропуска записи.
@@ -236,8 +241,11 @@ func ortoolsSolve(in SolveInput, parallelism int, timeout time.Duration) (Result
 			DayOfWeek: int(outDay[i]),
 			Timeslot:  int(outSlot[i]),
 		})
+		placed++ // считаем только реально попавшие в entries записи
 	}
-	return Result{Entries: entries, Placed: placed, Total: n, Violations: 0}, true
+	// Total — все вхождения модели (occCount), а не outCount: DLL пишет
+	// outCount строк, включая не размещённые (day = -1).
+	return Result{Entries: entries, Placed: placed, Total: occCount, Violations: 0}, true
 }
 
 func maxInt(a, b int) int {

@@ -144,3 +144,77 @@ func TestSwapEntries(t *testing.T) {
 		}
 	}
 }
+
+// TestRoomAndSubjectTypesPersisted — регрессия: orDefault проверял значения
+// как JSON, и обычная строка "lab" молча заменялась на "any". Из-за этого
+// кабинеты никогда не имели свой тип, а фильтр RequiresRoomType у предметов
+// всегда вырождался в «любой кабинет».
+func TestRoomAndSubjectTypesPersisted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := s.CreateSchool("Типы")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateRoom(domain.Room{SchoolID: sc.ID, Name: "Лаборатория", RoomType: "lab"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateSubject(domain.Subject{SchoolID: sc.ID, Name: "Информатика", RequiresRoomType: "lab"}); err != nil {
+		t.Fatal(err)
+	}
+	rooms, err := s.ListRooms(sc.ID)
+	if err != nil || len(rooms) != 1 {
+		t.Fatalf("ListRooms: %+v err=%v", rooms, err)
+	}
+	if rooms[0].RoomType != "lab" {
+		t.Fatalf("room type not persisted: %+v", rooms[0])
+	}
+	subs, err := s.ListSubjects(sc.ID)
+	if err != nil || len(subs) != 1 {
+		t.Fatalf("ListSubjects: %+v err=%v", subs, err)
+	}
+	if subs[0].RequiresRoomType != "lab" {
+		t.Fatalf("subject room type not persisted: %+v", subs[0])
+	}
+	if err := s.UpdateRoom(domain.Room{ID: rooms[0].ID, SchoolID: sc.ID, Name: rooms[0].Name, RoomType: "gym"}); err != nil {
+		t.Fatal(err)
+	}
+	rooms, _ = s.ListRooms(sc.ID)
+	if rooms[0].RoomType != "gym" {
+		t.Fatalf("UpdateRoom lost the type: %+v", rooms[0])
+	}
+}
+
+// TestClearSchoolDataWithHomeRoom — регрессия: список таблиц удалял rooms
+// раньше classes, а classes.room_id ссылается на rooms(id) без CASCADE —
+// очистка данных школы падала на FOREIGN KEY constraint failed, ломая
+// повторный импорт в существующую школу.
+func TestClearSchoolDataWithHomeRoom(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := s.CreateSchool("С кабинетом")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err := s.CreateRoom(domain.Room{SchoolID: sc.ID, Name: "204"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateClass(domain.SchoolClass{SchoolID: sc.ID, Name: "9А", RoomID: room.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearSchoolData(sc.ID); err != nil {
+		t.Fatalf("ClearSchoolData with a home-roomed class: %v", err)
+	}
+	classes, _ := s.ListClasses(sc.ID)
+	rooms, _ := s.ListRooms(sc.ID)
+	if len(classes) != 0 || len(rooms) != 0 {
+		t.Fatalf("school data not cleared: classes=%d rooms=%d", len(classes), len(rooms))
+	}
+}

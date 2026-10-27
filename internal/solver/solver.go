@@ -157,6 +157,7 @@ func Solve(ctx context.Context, in SolveInput, parallelism int, timeout time.Dur
 func runRestarts(ctx context.Context, env searchEnv, rng *rand.Rand) Result {
 	best := Result{Total: len(env.occ)}
 	deadline, _ := ctx.Deadline()
+	stagnant := 0 // полных попыток подряд без улучшения (когда дедлайна нет)
 	for {
 		if ctx.Err() != nil || !deadline.IsZero() && time.Now().After(deadline) {
 			break
@@ -169,16 +170,30 @@ func runRestarts(ctx context.Context, env searchEnv, rng *rand.Rand) Result {
 			attemptDl = deadline
 		}
 		r := backtrackDl(ctx, env, rng, attemptDl)
-		if r.Placed > best.Placed || (r.Placed == best.Placed && r.Violations < best.Violations) {
+		improved := r.Placed > best.Placed || (r.Placed == best.Placed && r.Violations < best.Violations)
+		if improved {
 			best = r
+			stagnant = 0
 		}
 		if r.Placed == env.placeable && r.Violations == 0 {
 			break // perfect
 		}
 		if r.Placed == env.placeable {
-			// good enough, keep searching a bit for fewer violations
-			if time.Now().After(deadline.Add(-200 * time.Millisecond)) {
-				break
+			// Полное размещение: ищем вариант с меньшим числом мягких
+			// нарушений, пока остаётся время. Раньше deadline.Add на
+			// нулевом дедлайне (timeout=0, «без лимита») обрывал цикл
+			// сразу после первой попытки.
+			if !deadline.IsZero() {
+				if time.Now().After(deadline.Add(-200 * time.Millisecond)) {
+					break
+				}
+			} else {
+				if !improved {
+					stagnant++
+				}
+				if stagnant >= 20 {
+					break // без дедлайна: стоп после 20 попыток без прогресса
+				}
 			}
 		}
 	}
@@ -215,6 +230,7 @@ type searchEnv struct {
 	occCIdx     []int          // → плотный индекс класса
 	occCS       []classSetsIdx // → check/mark наборы (базы уже умножены на stride)
 	occRoomIdx  [][]int        // → плотные индексы кабинетов (параллельно RoomChoices)
+	occRoomBad  [][][]bool     // occurrence → индекс комнаты в RoomChoices → запрещённые (d,s) по room_unavailable
 	occTMaxDay  []int          // макс. уроков в день учителя (0 = нет правила)
 	occCMaxDay  []int
 	occTMaxCons []int // макс. подряд уроков учителя (0 = нет правила)
@@ -496,6 +512,7 @@ func buildSearchEnv(in SolveInput, days, slots int) searchEnv {
 	env.occCIdx = make([]int, n)
 	env.occCS = make([]classSetsIdx, n)
 	env.occRoomIdx = make([][]int, n)
+	env.occRoomBad = make([][][]bool, n)
 	env.occTMaxDay = make([]int, n)
 	env.occCMaxDay = make([]int, n)
 	env.occTMaxCons = make([]int, n)
@@ -508,10 +525,25 @@ func buildSearchEnv(in SolveInput, days, slots int) searchEnv {
 		env.occTIdx[i] = tIdx
 		env.occCIdx[i] = cIdx
 		ri := make([]int, len(o.RoomChoices))
+		bad := make([][]bool, len(o.RoomChoices))
 		for k, r := range o.RoomChoices {
 			ri[k] = rPos[r]
+			// Жёсткие room_unavailable для этой комнаты: (d,s) → запрещён.
+			// Раньше fallback игнорировал их вовсе (HardSet вызывался с
+			// roomID=0), а bind.cpp CP-SAT соблюдал — итог разный в
+			// зависимости от сборки.
+			row := make([]bool, days*slots)
+			for d := 0; d < days; d++ {
+				for s := 0; s < slots; s++ {
+					if hard.room[r][d*1000+s] {
+						row[d*slots+s] = true
+					}
+				}
+			}
+			bad[k] = row
 		}
 		env.occRoomIdx[i] = ri
+		env.occRoomBad[i] = bad
 		if cs, ok := denseClassSets(env.classSets[cID], cPos, stride); ok {
 			env.occCS[i] = cs
 		}
@@ -583,6 +615,7 @@ func backtrackDl(ctx context.Context, env searchEnv, rng *rand.Rand, deadline ti
 
 	tBusy := make([]bool, env.nT*stride) // учитель занят
 	cBusy := make([]int, env.nC*stride)  // класс занят (ID предмета; 0 = свободен)
+	cRef := make([]int, env.nC*stride)   // сколько вхождений держат клетку (база + половинка)
 	rBusy := make([]bool, env.nR*stride) // кабинет занят
 	tDay := make([]int, env.nT*days)     // уроков в день у учителя
 	cDay := make([]int, env.nC*days)     // уроков в день у класса
@@ -637,16 +670,25 @@ func backtrackDl(ctx context.Context, env searchEnv, rng *rand.Rand, deadline ti
 		// достаточно вычислить один раз на узел. Проверки учителя и
 		// класса — один раз на (d,s)-слот; комнаты перебираются внутри
 		// свободного слота.
+		// Половинка делёного урока допускает пересечение по предмету
+		// (она обязана встать в слот базы, где клетки уже помечены);
+		// для всех остальных Same-предмет в клетке = конфликт двойного
+		// урока одного класса и блокируется.
+		_, isHalf := env.baseOfOcc[oi]
+		roomBad := env.occRoomBad[oi]
 		cands := env.candBuf[oi][:0]
 		for _, dsc := range env.staticDS[oi] {
 			ds := dsc.day*slots + dsc.slot
 			if tBusy[tBase+ds] {
 				continue
 			}
-			if !classFreeFlat(cs.check, cBusy, ds, subj) {
+			if !classFreeFlat(cs.check, cBusy, ds, subj, isHalf) {
 				continue
 			}
 			for k2, r := range o.RoomChoices {
+				if roomBad[k2][ds] {
+					continue // жёсткое room_unavailable
+				}
 				if rBusy[roomIdx[k2]*stride+ds] {
 					continue
 				}
@@ -687,7 +729,12 @@ func backtrackDl(ctx context.Context, env searchEnv, rng *rand.Rand, deadline ti
 			}
 			tBusy[tBase+ds] = true
 			for _, cb := range cs.mark {
-				cBusy[cb+ds] = subj
+				// База и половинка законно держат одну клетку вместе:
+				// считаем ссылки, чтобы откат половинки не стёр метку базы.
+				if cRef[cb+ds] == 0 {
+					cBusy[cb+ds] = subj
+				}
+				cRef[cb+ds]++
 			}
 			rBusy[cc.rIdx*stride+ds] = true
 			tDay[tDayBase+cc.day]++
@@ -704,7 +751,10 @@ func backtrackDl(ctx context.Context, env searchEnv, rng *rand.Rand, deadline ti
 			}
 			tBusy[tBase+ds] = false
 			for _, cb := range cs.mark {
-				cBusy[cb+ds] = 0
+				cRef[cb+ds]--
+				if cRef[cb+ds] == 0 {
+					cBusy[cb+ds] = 0
+				}
 			}
 			rBusy[cc.rIdx*stride+ds] = false
 			tDay[tDayBase+cc.day]--
@@ -745,19 +795,22 @@ type cell struct {
 }
 
 // classFreeFlat: слот свободен для урока с предметом subj. Занятость
-// хранит ID предмета: занято ТЕМ ЖЕ предметом (делёный урок, обе
-// половинки параллельно) — не блокирует; другим предметом — блокирует.
+// хранит ID предмета; клетка занята ТЕМ ЖЕ предметом — не блокирует
+// ТОЛЬКО половинку делёного урока (allowSame: она обязана встать в слот
+// базы, где клетки уже помечены базой). Для всех остальных Same-предмет
+// означает два урока одного класса в слоте — это конфликт двойного
+// бронирования и блокируется. Другой предмет — блокирует всегда.
 // cb — плотные базы классов (idx*stride), ds — смещение слота.
-func classFreeFlat(check []int, cBusy []int, ds int, subj int) bool {
+func classFreeFlat(check []int, cBusy []int, ds int, subj int, allowSame bool) bool {
 	for _, cb := range check {
 		busySubj := cBusy[cb+ds]
 		if busySubj == 0 {
 			continue
 		}
-		if busySubj == subj {
+		if allowSame && busySubj == subj {
 			continue // делёный предмет: обе половинки параллельно
 		}
-		return false // слот занят другим предметом этого класса
+		return false // слот занят этим классом
 	}
 	return true
 }
@@ -1197,9 +1250,18 @@ func HasPreciseSolver() bool {
 // pure-Go backtracking solver so the default build always works.
 // onProgress is forwarded to the pure-Go fallback (OR-Tools C++ solver is
 // blocking and cannot report intermediate progress).
+//
+// Известное ограничение: вызов CP-SAT блокирующий и ctx его НЕ прерывает —
+// отмена работает только ДО старта (проверка ниже) и через timeout-параметр,
+// который передаётся в CP-SAT как его собственный time limit. Полная отмена
+// потребовала бы stop-колбэка в bind.cpp.
 func SolvePrecise(ctx context.Context, in SolveInput, parallelism int, timeout time.Duration, onProgress func(placed int)) Result {
 	start := time.Now()
 	if preciseSolver != nil {
+		if ctx.Err() != nil {
+			// Контекст уже отменён — не запускаем блокирующий C++ вызов.
+			return Solve(ctx, in, parallelism, 0, onProgress)
+		}
 		r, ok := preciseSolver(in, parallelism, timeout)
 		if ok && r.Placed >= r.Total {
 			r.ElapsedMs = time.Since(start).Milliseconds()

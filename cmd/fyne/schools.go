@@ -11,6 +11,15 @@ import (
 	"timetable/internal/db"
 )
 
+// schoolRow — шаблон строки списка школ: контейнер + типизированные ссылки
+// на виджеты (позиционное индексирование Objects у Border ненадёжно).
+type schoolRow struct {
+	*fyne.Container
+	name *widget.Entry
+	save *widget.Button
+	del  *widget.Button
+}
+
 // buildSchoolsView — список школ на widget.NewList (виртуализация: плавный
 // скролл и один шаблон строки на все данные).
 func buildSchoolsView(store *db.Store, w fyne.Window, onChange func(preferredID int)) fyne.CanvasObject {
@@ -23,19 +32,22 @@ func buildSchoolsView(store *db.Store, w fyne.Window, onChange func(preferredID 
 			schools, _ := store.ListSchools()
 			return len(schools)
 		},
-		// Шаблон строки: Border(left=entry, center=кнопки).
-		// Objects[0] — entry, Objects[1] — контейнер кнопок.
+		// Шаблон строки: schoolRow хранит типизированные ссылки на виджеты —
+		// порядок Objects у container.NewBorder зависеть от позиции нельзя.
 		func() fyne.CanvasObject {
 			nameEd := widget.NewEntry()
 			btnSave := widget.NewButton("Изменить", nil)
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				nameEd, nil,
-				container.NewHBox(btnSave, btnDel),
-			)
+			return &schoolRow{
+				Container: container.NewBorder(
+					nil, nil,
+					nameEd, nil,
+					container.NewHBox(btnSave, btnDel),
+				),
+				name: nameEd, save: btnSave, del: btnDel,
+			}
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			schools, err := store.ListSchools()
@@ -43,11 +55,10 @@ func buildSchoolsView(store *db.Store, w fyne.Window, onChange func(preferredID 
 				return
 			}
 			sc := schools[i]
-			box := obj.(*fyne.Container)
-			nameEd := box.Objects[0].(*widget.Entry)
-			btns := box.Objects[1].(*fyne.Container)
-			btnSave := btns.Objects[0].(*widget.Button)
-			btnDel := btns.Objects[1].(*widget.Button)
+			row := obj.(*schoolRow)
+			nameEd := row.name
+			btnSave := row.save
+			btnDel := row.del
 
 			nameEd.SetText(sc.Name)
 			nameEd.Disable()

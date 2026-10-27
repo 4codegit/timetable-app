@@ -169,12 +169,35 @@ func ImportAll(s *db.Store, snap *Snapshot) (*domain.School, error) {
 			subjectIDMap[oldID] = created.ID
 		}
 
+		// Кабинеты создаются раньше классов: classes.room_id ссылается на
+		// rooms(id), и при импорте в новую базу старый RoomID из снапшота
+		// нужно ремапить ДО вставки, иначе FK-ошибка (или, при совпавшем ID,
+		// молчаливая привязка к чужому кабинету).
+		for _, r := range snap.Rooms {
+			oldID := r.ID
+			r.SchoolID = schoolID
+			r.ID = 0
+			r.RoomType = orDefaultStr(r.RoomType, "any")
+			created, err := tx.CreateRoom(r)
+			if err != nil {
+				return fmt.Errorf("create room %q: %w", r.Name, err)
+			}
+			roomIDMap[oldID] = created.ID
+		}
+
 		type subgroupRestore struct{ classID, oldParentID int }
 		var subgroups []subgroupRestore
 		for _, c := range snap.Classes {
 			oldID := c.ID
 			c.SchoolID = schoolID
 			c.ID = 0
+			if oldRoom := c.RoomID; oldRoom != 0 {
+				newRoom, ok := roomIDMap[oldRoom]
+				if !ok {
+					return fmt.Errorf("class %q references a missing room", c.Name)
+				}
+				c.RoomID = newRoom
+			}
 			if c.SubgroupOf != nil {
 				subgroups = append(subgroups, subgroupRestore{classID: oldID, oldParentID: *c.SubgroupOf})
 				c.SubgroupOf = nil
@@ -194,18 +217,6 @@ func ImportAll(s *db.Store, snap *Snapshot) (*domain.School, error) {
 			if err := tx.UpdateClassSubgroup(classID, &parentID); err != nil {
 				return fmt.Errorf("restore subgroup: %w", err)
 			}
-		}
-
-		for _, r := range snap.Rooms {
-			oldID := r.ID
-			r.SchoolID = schoolID
-			r.ID = 0
-			r.RoomType = orDefaultStr(r.RoomType, "any")
-			created, err := tx.CreateRoom(r)
-			if err != nil {
-				return fmt.Errorf("create room %q: %w", r.Name, err)
-			}
-			roomIDMap[oldID] = created.ID
 		}
 
 		for _, l := range snap.Lessons {

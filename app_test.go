@@ -615,3 +615,61 @@ func splitLines(s string) []string {
 	}
 	return out
 }
+
+// TestImportRemapsClassHomeRoom — регрессия: ImportAll создавал классы со
+// старым RoomID из снапшота ДО создания комнат. При импорте в новую базу это
+// падало на FK, а при совпавшем ID класс молча привязывался к чужому
+// кабинету. Теперь комнаты создаются раньше классов и RoomID ремапится.
+func TestImportRemapsClassHomeRoom(t *testing.T) {
+	source := newTestApp(t)
+	school, err := source.CreateSchool("Экспорт кабинета")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err := source.CreateRoom(domain.Room{SchoolID: school.ID, Name: "305"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := source.CreateClass(domain.SchoolClass{SchoolID: school.ID, Name: "11Б", RoomID: room.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Импортируем в базу, где уже есть СВОИ комнаты с другими ID.
+	destination := newTestApp(t)
+	other, err := destination.CreateSchool("Местная школа")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := destination.CreateRoom(domain.Room{SchoolID: other.ID, Name: "Локальный кабинет"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := source.ExportAll(school.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := destination.ImportAll(string(data))
+	if err != nil {
+		t.Fatalf("ImportAll with a home-roomed class: %v", err)
+	}
+	classes, err := destination.ListClasses(imported.ID)
+	if err != nil || len(classes) != 1 {
+		t.Fatalf("ListClasses: %+v err=%v", classes, err)
+	}
+	importedRooms, err := destination.ListRooms(imported.ID)
+	if err != nil || len(importedRooms) != 1 {
+		t.Fatalf("ListRooms: %+v err=%v", importedRooms, err)
+	}
+	if classes[0].RoomID != importedRooms[0].ID {
+		t.Fatalf("class home room was not remapped: class=%+v room=%+v", classes[0], importedRooms[0])
+	}
+	if classes[0].RoomID == room.ID {
+		t.Fatalf("class still points at the source DB room id %d", room.ID)
+	}
+	_ = parent
+}

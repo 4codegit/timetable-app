@@ -49,29 +49,17 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	}
 	usePrecise := widget.NewCheck("Точный CP-SAT (OR-Tools)", nil)
 	preciseInfo := widget.NewLabel("")
+	// Лимит времени относится к ЛЮБОМУ решателю (CP-SAT и эвристическому)
+	// и поэтому всегда доступен; «Остановить» работает для эвристического.
 	if solver.HasPreciseSolver() {
 		preciseInfo.SetText("В этой сборке доступен OR-Tools CP-SAT.")
-		timeoutPreset.Disable()
-		usePrecise.OnChanged = func(enabled bool) {
-			if enabled {
-				timeoutPreset.Enable()
-				if timeoutPreset.Selected == "Другое" {
-					timeoutCustom.Enable()
-				}
-			} else {
-				timeoutPreset.Disable()
-				timeoutCustom.Disable()
-			}
-		}
 		// Large schedules need CP-SAT when the native solver is available.
 		// Keep it enabled by default so generation does not silently use the
 		// weaker pure-Go fallback.
 		usePrecise.SetChecked(true)
-		timeoutPreset.Enable()
 	} else {
 		usePrecise.Disable()
-		timeoutPreset.Disable()
-		preciseInfo.SetText("OR-Tools не включён в эту сборку; используется стандартный решатель.")
+		preciseInfo.SetText("OR-Tools не включён в эту сборку; используется стандартный решатель (лимит и «Остановить» действуют для него).")
 	}
 	generationButton := widget.NewButton("Сгенерировать расписание", nil)
 	generationButton.Importance = widget.HighImportance
@@ -87,6 +75,10 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	var previous []domain.ScheduleEntry
 	var generationDone bool
 	generationButton.OnTapped = func() {
+		if activeGeneration != nil {
+			showError(w, "Генерация уже выполняется — дождитесь завершения или остановите её.")
+			return
+		}
 		days, slots := settings.Days, settings.Slots
 		if timeoutPreset.Selected == "Другое" {
 			n, err := strconv.Atoi(strings.TrimSpace(timeoutCustom.Text))
@@ -115,7 +107,7 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		}
 		previous, err = store.ListSchedule(schoolID)
 		if err != nil {
-			showError(w, "Не удалось сохранить текущее расписание: "+err.Error())
+			showError(w, "Не удалось загрузить текущее расписание: "+err.Error())
 			return
 		}
 		generationDone = false
@@ -137,6 +129,7 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		}
 		ctx, stop := context.WithCancel(context.Background())
 		cancel = stop
+		activeGeneration = &runningGeneration{schoolID: schoolID, cancel: stop}
 		go runGeneration(ctx, store, schoolID, days, slots, settings.DaysMask, timeoutSec, usePrecise.Checked,
 			func(placed, total int, state string) {
 				fyne.Do(func() {
@@ -155,22 +148,20 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 						cancel()
 					}
 					cancel = nil
+					activeGeneration = nil
 					generationButton.Enable()
 					cancelButton.Disable()
 					if solver.HasPreciseSolver() {
 						usePrecise.Enable()
-						if usePrecise.Checked {
-							timeoutPreset.Enable()
-							if timeoutPreset.Selected == "Другое" {
-								timeoutCustom.Enable()
-							}
-						} else {
-							timeoutPreset.Disable()
-							timeoutCustom.Disable()
-						}
 					} else {
 						usePrecise.Disable()
-						timeoutPreset.Disable()
+					}
+					// Лимит действует для любого решателя — возвращаем
+					// доступ к нему после завершения генерации.
+					timeoutPreset.Enable()
+					if timeoutPreset.Selected == "Другое" {
+						timeoutCustom.Enable()
+					} else {
 						timeoutCustom.Disable()
 					}
 					generationDone = true
@@ -208,12 +199,30 @@ func buildGenerationView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 		undoButton.Disable()
 		status.SetText("Предыдущее расписание восстановлено.")
 	}
+	// Вид пересобрали, пока генерация ещё идёт (пользователь уходил с
+	// страницы и вернулся): кнопка запуска недоступна до её завершения,
+	// «Остановить» подключается к cancel активной генерации.
+	if activeGeneration != nil {
+		generationButton.Disable()
+		status.SetText("Идёт генерация (запущена ранее)…")
+		if activeGeneration.schoolID == schoolID && activeGeneration.cancel != nil {
+			cancelButton.Enable()
+			runningCancel := activeGeneration.cancel
+			cancelButton.OnTapped = func() {
+				runningCancel()
+				cancelButton.Disable()
+				status.SetText("Останавливаю генератор…")
+			}
+		} else {
+			cancelButton.Disable()
+		}
+	}
 	return container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("Генерация расписания", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
 		nil, nil, nil,
 		container.NewVScroll(container.NewVBox(
 			widget.NewLabel("Используются выбранные учебные дни и звонки из настроек школы."),
-			widget.NewForm(widget.NewFormItem("Учебных дней", daysEd), widget.NewFormItem("Уроков в день", slotsEd), widget.NewFormItem("Лимит точного поиска", timeoutPreset), widget.NewFormItem("Другой лимит", timeoutCustom)),
+			widget.NewForm(widget.NewFormItem("Учебных дней", daysEd), widget.NewFormItem("Уроков в день", slotsEd), widget.NewFormItem("Лимит времени поиска", timeoutPreset), widget.NewFormItem("Другой лимит", timeoutCustom)),
 			usePrecise,
 			preciseInfo,
 			container.NewHBox(generationButton, cancelButton, undoButton),
@@ -295,7 +304,10 @@ func runGeneration(ctx context.Context, store *db.Store, schoolID, days, slots, 
 	if usePrecise {
 		result = solver.SolvePrecise(ctx, in, runtime.NumCPU(), time.Duration(timeoutSec)*time.Second, func(placed int) { onProgress(placed, total, "running") })
 	} else {
-		result = solver.Solve(ctx, in, runtime.NumCPU(), 30*time.Second, func(placed int) { onProgress(placed, total, "running") })
+		// Эвристический решатель получает выбранный пользователем лимит
+		// (0 = без лимита; «Остановить» доступна). Раньше здесь был
+		// жёстко зашитый 30 с — молча, вопреки выбору в поле лимита.
+		result = solver.Solve(ctx, in, runtime.NumCPU(), time.Duration(timeoutSec)*time.Second, func(placed int) { onProgress(placed, total, "running") })
 	}
 	if ctx.Err() != nil {
 		finish(result.Placed, result.Total, "cancelled", nil)

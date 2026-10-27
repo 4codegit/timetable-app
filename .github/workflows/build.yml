@@ -180,9 +180,82 @@ jobs:
             https://api.github.com/repos/4codegit/timetable/issues \
             -d "{\"title\":\"CI verify debug ${{ github.ref_name }}\",\"body\":$BODY}" || echo "issue-create-failed"
 
+  build-fyne-linux:
+    name: Fyne desktop app (Linux, with CP-SAT)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install Fyne build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config g++ \
+            libgl1-mesa-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxext-dev libxxf86vm-dev libasound2-dev \
+            libwayland-dev libxkbcommon-dev
+      - name: Build OR-Tools C++ binding
+        run: bash scripts/build_ortools.sh
+      - name: Build timetable-fyne
+        run: go build -tags ortools -o timetable-fyne ./cmd/fyne
+      - name: Bundle binary + libortools (rpath is $ORIGIN — библиотека лежит рядом с бинарником)
+        run: |
+          mkdir -p fyne-dist
+          cp timetable-fyne fyne-dist/
+          cp -L third_party/ortools/lib/libortools.so.9 fyne-dist/
+          tar -czf timetable-fyne-linux-x64.tar.gz -C fyne-dist timetable-fyne libortools.so.9
+          tar -tzf timetable-fyne-linux-x64.tar.gz
+          # Проверяем, что сборка действительно линкуется с CP-SAT.
+          ldd fyne-dist/timetable-fyne | grep libortools
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timetable-fyne-linux
+          path: timetable-fyne-linux-x64.tar.gz
+
+  build-fyne-windows:
+    name: Fyne desktop app (Windows, with CP-SAT)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install LLVM (clang-cl)
+        run: choco install llvm -y
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build OR-Tools Windows C++ binding
+        shell: bash
+        run: bash scripts/build_ortools_windows.sh
+      - name: Build timetable-fyne.exe (CGO + mingw gcc)
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          CC: "gcc"
+          MSYS_NO_PATHCONV: "1"
+        run: |
+          export PATH="/c/mingw64/bin:$PATH"
+          go build -tags ortools -o timetable-fyne.exe ./cmd/fyne
+      - name: Package exe + ortools_csat.dll
+        shell: bash
+        run: |
+          mkdir -p fyne-dist
+          cp timetable-fyne.exe fyne-dist/
+          cp third_party/ortools_win/ortools_csat.dll fyne-dist/
+          if [ -f third_party/ortools_win/bin/ortools.dll ]; then
+            cp third_party/ortools_win/bin/ortools.dll fyne-dist/
+          fi
+          powershell Compress-Archive -Path fyne-dist/* -DestinationPath timetable-fyne-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timetable-fyne-windows
+          path: timetable-fyne-windows-x64.zip
+
   release:
     name: GitHub Release
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, build-fyne-linux, build-fyne-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -196,3 +269,5 @@ jobs:
           files: |
             artifacts/timetable-windows-setup/*
             artifacts/timetable-linux/*
+            artifacts/timetable-fyne-linux/*
+            artifacts/timetable-fyne-windows/*

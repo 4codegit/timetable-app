@@ -39,6 +39,14 @@ func buildRefsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 // ---------- Учителя ----------
 
+// teacherRow — шаблон строки списка учителей с типизированными ссылками
+// (позиционное индексирование Objects у Border ненадёжно).
+type teacherRow struct {
+	*fyne.Container
+	name, short *widget.Entry
+	save, del   *widget.Button
+}
+
 func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	var list *widget.List
 	list = widget.NewList(
@@ -49,8 +57,6 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			ts, _ := store.ListTeachers(activeSchoolID)
 			return len(ts)
 		},
-		// Шаблон: Border(left=поля, center=кнопки).
-		// Objects[0] — контейнер полей, Objects[1] — контейнер кнопок.
 		func() fyne.CanvasObject {
 			nameEd := widget.NewEntry()
 			shortEd := widget.NewEntry()
@@ -58,11 +64,14 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				container.NewHBox(nameEd, shortEd), nil,
-				container.NewHBox(btnSave, btnDel),
-			)
+			return &teacherRow{
+				Container: container.NewBorder(
+					nil, nil,
+					container.NewHBox(nameEd, shortEd), nil,
+					container.NewHBox(btnSave, btnDel),
+				),
+				name: nameEd, short: shortEd, save: btnSave, del: btnDel,
+			}
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			if activeSchoolID == 0 {
@@ -73,13 +82,11 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				return
 			}
 			t := ts[i]
-			box := obj.(*fyne.Container)
-			fields := box.Objects[0].(*fyne.Container)
-			btns := box.Objects[1].(*fyne.Container)
-			nameEd := fields.Objects[0].(*widget.Entry)
-			shortEd := fields.Objects[1].(*widget.Entry)
-			btnSave := btns.Objects[0].(*widget.Button)
-			btnDel := btns.Objects[1].(*widget.Button)
+			row := obj.(*teacherRow)
+			nameEd := row.name
+			shortEd := row.short
+			btnSave := row.save
+			btnDel := row.del
 
 			nameEd.SetText(t.Name)
 			shortEd.SetText(t.ShortName)
@@ -152,6 +159,13 @@ func buildTeachersView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 // ---------- Предметы ----------
 
+// subjectRow — шаблон строки списка предметов.
+type subjectRow struct {
+	*fyne.Container
+	name, short, roomType *widget.Entry
+	save, del             *widget.Button
+}
+
 func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	var list *widget.List
 	list = widget.NewList(
@@ -171,11 +185,14 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				container.NewHBox(nameEd, shortEd, roomTypeEd), nil,
-				container.NewHBox(btnSave, btnDel),
-			)
+			return &subjectRow{
+				Container: container.NewBorder(
+					nil, nil,
+					container.NewHBox(nameEd, shortEd, roomTypeEd), nil,
+					container.NewHBox(btnSave, btnDel),
+				),
+				name: nameEd, short: shortEd, roomType: roomTypeEd, save: btnSave, del: btnDel,
+			}
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			if activeSchoolID == 0 {
@@ -186,14 +203,12 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				return
 			}
 			s := subs[i]
-			box := obj.(*fyne.Container)
-			fields := box.Objects[0].(*fyne.Container)
-			btns := box.Objects[1].(*fyne.Container)
-			nameEd := fields.Objects[0].(*widget.Entry)
-			shortEd := fields.Objects[1].(*widget.Entry)
-			roomTypeEd := fields.Objects[2].(*widget.Entry)
-			btnSave := btns.Objects[0].(*widget.Button)
-			btnDel := btns.Objects[1].(*widget.Button)
+			row := obj.(*subjectRow)
+			nameEd := row.name
+			shortEd := row.short
+			roomTypeEd := row.roomType
+			btnSave := row.save
+			btnDel := row.del
 
 			nameEd.SetText(s.Name)
 			shortEd.SetText(s.ShortName)
@@ -278,6 +293,14 @@ func buildSubjectsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 // ---------- Классы ----------
 
+// classRow — шаблон строки списка классов.
+type classRow struct {
+	*fyne.Container
+	name         *widget.Entry
+	room, parent *widget.Select
+	save, del    *widget.Button
+}
+
 func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	roomOptions := []string{"Без кабинета"}
 	roomIDs := map[string]int{"Без кабинета": 0}
@@ -320,11 +343,14 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				container.NewHBox(nameEd, roomEd, parentEd), nil,
-				container.NewHBox(btnSave, btnDel),
-			)
+			return &classRow{
+				Container: container.NewBorder(
+					nil, nil,
+					container.NewHBox(nameEd, roomEd, parentEd), nil,
+					container.NewHBox(btnSave, btnDel),
+				),
+				name: nameEd, room: roomEd, parent: parentEd, save: btnSave, del: btnDel,
+			}
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			if activeSchoolID == 0 {
@@ -336,14 +362,12 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			}
 			c := classes[i]
 			rooms, _ := store.ListRooms(activeSchoolID)
-			box := obj.(*fyne.Container)
-			fields := box.Objects[0].(*fyne.Container)
-			nameEd := fields.Objects[0].(*widget.Entry)
-			roomEd := fields.Objects[1].(*widget.Select)
-			parentEd := fields.Objects[2].(*widget.Select)
-			btns := box.Objects[1].(*fyne.Container)
-			btnSave := btns.Objects[0].(*widget.Button)
-			btnDel := btns.Objects[1].(*widget.Button)
+			row := obj.(*classRow)
+			nameEd := row.name
+			roomEd := row.room
+			parentEd := row.parent
+			btnSave := row.save
+			btnDel := row.del
 
 			nameEd.SetText(c.Name)
 			roomIDs := map[string]int{"Без кабинета": 0}
@@ -473,6 +497,13 @@ func buildClassesView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 
 // ---------- Кабинеты ----------
 
+// roomRow — шаблон строки списка кабинетов.
+type roomRow struct {
+	*fyne.Container
+	name, roomType *widget.Entry
+	save, del      *widget.Button
+}
+
 func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	var list *widget.List
 	list = widget.NewList(
@@ -491,11 +522,14 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			btnSave.Importance = widget.LowImportance
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(
-				nil, nil,
-				container.NewHBox(nameEd, roomTypeEd), nil,
-				container.NewHBox(btnSave, btnDel),
-			)
+			return &roomRow{
+				Container: container.NewBorder(
+					nil, nil,
+					container.NewHBox(nameEd, roomTypeEd), nil,
+					container.NewHBox(btnSave, btnDel),
+				),
+				name: nameEd, roomType: roomTypeEd, save: btnSave, del: btnDel,
+			}
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			if activeSchoolID == 0 {
@@ -506,13 +540,11 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				return
 			}
 			r := rooms[i]
-			box := obj.(*fyne.Container)
-			fields := box.Objects[0].(*fyne.Container)
-			nameEd := fields.Objects[0].(*widget.Entry)
-			roomTypeEd := fields.Objects[1].(*widget.Entry)
-			btns := box.Objects[1].(*fyne.Container)
-			btnSave := btns.Objects[0].(*widget.Button)
-			btnDel := btns.Objects[1].(*widget.Button)
+			row := obj.(*roomRow)
+			nameEd := row.name
+			roomTypeEd := row.roomType
+			btnSave := row.save
+			btnDel := row.del
 
 			nameEd.SetText(r.Name)
 			roomTypeEd.SetText(r.RoomType)
@@ -589,6 +621,15 @@ func buildRoomsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 }
 
 // ---------- Уроки ----------
+
+// lessonRow — шаблон строки списка уроков.
+type lessonRow struct {
+	*fyne.Container
+	name  *widget.Label
+	hours *widget.Entry
+	save  *widget.Button
+	del   *widget.Button
+}
 
 func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	schoolID := activeSchoolID
@@ -673,7 +714,10 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 			btnSave := widget.NewButton("Сохранить", nil)
 			btnDel := widget.NewButton("Удалить", nil)
 			btnDel.Importance = widget.DangerImportance
-			return container.NewBorder(nil, nil, container.NewHBox(nameEd, hoursInput), nil, container.NewHBox(btnSave, btnDel))
+			return &lessonRow{
+				Container: container.NewBorder(nil, nil, container.NewHBox(nameEd, hoursInput), nil, container.NewHBox(btnSave, btnDel)),
+				name:      nameEd, hours: hoursInput, save: btnSave, del: btnDel,
+			}
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			if schoolID == 0 {
@@ -684,13 +728,11 @@ func buildLessonsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				return
 			}
 			l := lessons[i]
-			box := obj.(*fyne.Container)
-			fields := box.Objects[0].(*fyne.Container)
-			buttons := box.Objects[1].(*fyne.Container)
-			nameEd := fields.Objects[0].(*widget.Label)
-			hoursInput := fields.Objects[1].(*widget.Entry)
-			btnSave := buttons.Objects[0].(*widget.Button)
-			btnDel := buttons.Objects[1].(*widget.Button)
+			row := obj.(*lessonRow)
+			nameEd := row.name
+			hoursInput := row.hours
+			btnSave := row.save
+			btnDel := row.del
 			nameEd.SetText(fmt.Sprintf("%s → %s · %s", getClassName(classes, l.ClassID), getSubjName(subjects, l.SubjectID), getTeacherName(teachers, l.TeacherID)))
 			hoursInput.SetText(fmt.Sprintf("%d", l.HoursPerWeek))
 			btnSave.OnTapped = func() {

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -132,10 +133,25 @@ func (s *Store) migrate() error {
 	// Нормализация: кабинет класса — отдельное поле room_id, а количество
 	// мест/учеников не хранится вовсе. Старые таблицы пересоздаются.
 	rebuild := func(table string, createSQL string, copySQL string) error {
-		if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		// PRAGMA foreign_keys — свойство СОЕДИНЕНИЯ, а не базы: через пул
+		// OFF мог бы попасть на одно соединение, а DROP TABLE — на другое
+		// с включённым FK (молчаливое каскадное удаление lessons и
+		// schedule_entries). Поэтому все шаги идут по одному выделенному
+		// соединению из пула.
+		ctx := context.Background()
+		conn, err := s.root.Conn(ctx)
+		if err != nil {
 			return err
 		}
-		defer s.db.Exec(`PRAGMA foreign_keys=ON`)
+		defer conn.Close()
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+			return err
+		}
+		defer func() {
+			if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+				log.Printf("migrate: restore foreign_keys=ON: %v", err)
+			}
+		}()
 		steps := []string{
 			`DROP TABLE IF EXISTS ` + table + `_new`,
 			`CREATE TABLE ` + table + `_new (` + createSQL + `)`,
@@ -144,7 +160,7 @@ func (s *Store) migrate() error {
 			`ALTER TABLE ` + table + `_new RENAME TO ` + table,
 		}
 		for _, st := range steps {
-			if _, err := s.db.Exec(st); err != nil {
+			if _, err := conn.ExecContext(ctx, st); err != nil {
 				return err
 			}
 		}
@@ -294,6 +310,9 @@ func (s *Store) ListSchools() ([]domain.School, error) {
 		}
 		out = append(out, sc)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -309,7 +328,7 @@ func (s *Store) GetSchool(id int) (*domain.School, error) {
 
 // UpdateSchool restores the user-facing school metadata during an import.
 func (s *Store) UpdateSchool(sc domain.School) error {
-	res, err := s.db.Exec(`UPDATE schools SET name=?, settings_json=? WHERE id=?`, sc.Name, orDefault(sc.SettingsJSON, "{}"), sc.ID)
+	res, err := s.db.Exec(`UPDATE schools SET name=?, settings_json=? WHERE id=?`, sc.Name, orJSON(sc.SettingsJSON, "{}"), sc.ID)
 	if err != nil {
 		return err
 	}
@@ -361,6 +380,9 @@ func (s *Store) ListTeachers(schoolID int) ([]domain.Teacher, error) {
 		}
 		out = append(out, t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -368,7 +390,7 @@ func (s *Store) ListTeachers(schoolID int) ([]domain.Teacher, error) {
 
 func (s *Store) CreateSubject(sub domain.Subject) (*domain.Subject, error) {
 	res, err := s.db.Exec(`INSERT INTO subjects (school_id, name, short_name, requires_room_type) VALUES (?,?,?,?)`,
-		sub.SchoolID, sub.Name, sub.ShortName, orDefault(sub.RequiresRoomType, "any"))
+		sub.SchoolID, sub.Name, sub.ShortName, orDefaultStr(sub.RequiresRoomType, "any"))
 	if err != nil {
 		return nil, err
 	}
@@ -390,6 +412,9 @@ func (s *Store) ListSubjects(schoolID int) ([]domain.Subject, error) {
 			return nil, err
 		}
 		out = append(out, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -426,6 +451,9 @@ func (s *Store) ListClasses(schoolID int) ([]domain.SchoolClass, error) {
 		}
 		out = append(out, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -440,7 +468,7 @@ func (s *Store) UpdateClassSubgroup(id int, parent *int) error {
 
 func (s *Store) CreateRoom(r domain.Room) (*domain.Room, error) {
 	res, err := s.db.Exec(`INSERT INTO rooms (school_id, name, room_type) VALUES (?,?,?)`,
-		r.SchoolID, r.Name, orDefault(r.RoomType, "any"))
+		r.SchoolID, r.Name, orDefaultStr(r.RoomType, "any"))
 	if err != nil {
 		return nil, err
 	}
@@ -462,6 +490,9 @@ func (s *Store) ListRooms(schoolID int) ([]domain.Room, error) {
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -492,6 +523,9 @@ func (s *Store) ListLessons(schoolID int) ([]domain.Lesson, error) {
 			return nil, err
 		}
 		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -535,7 +569,7 @@ func (s *Store) UpdateClass(c domain.SchoolClass) error {
 
 func (s *Store) UpdateRoom(r domain.Room) error {
 	_, err := s.db.Exec(`UPDATE rooms SET name=?, room_type=? WHERE id=?`,
-		r.Name, orDefault(r.RoomType, "any"), r.ID)
+		r.Name, orDefaultStr(r.RoomType, "any"), r.ID)
 	return err
 }
 
@@ -611,6 +645,9 @@ func (s *Store) ListConstraints(schoolID int) ([]domain.Constraint, error) {
 		}
 		out = append(out, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -659,6 +696,9 @@ func (s *Store) ListSchedule(schoolID int) ([]domain.ScheduleEntry, error) {
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -748,11 +788,21 @@ func (s *Store) replaceSchedule(schoolID int, entries []domain.ScheduleEntry) er
 	return nil
 }
 
-func orDefault(v, def string) string {
+// orJSON возвращает v, если это корректный JSON, иначе def (для settings_json).
+func orJSON(v, def string) string {
 	if v == "" {
 		return def
 	}
 	if !json.Valid([]byte(v)) {
+		return def
+	}
+	return v
+}
+
+// orDefaultStr возвращает v, если непусто, иначе def (для обычных строк —
+// типов кабинетов и предметов; JSON-проверка здесь губила значения вроде "lab").
+func orDefaultStr(v, def string) string {
+	if v == "" {
 		return def
 	}
 	return v
@@ -776,13 +826,15 @@ func (s *Store) WithTx(fn func(*Store) error) error {
 
 // ClearSchoolData removes all school-related data (schedule, lessons,
 // constraints, teachers, subjects, classes, rooms) for the given school.
+// classes идут раньше rooms: classes.room_id ссылается на rooms(id) без
+// CASCADE, при обратном порядке DELETE ломается на FK.
 func (s *Store) ClearSchoolData(schoolID int) error {
 	tables := []string{
 		"schedule_entries",
 		"lessons",
 		"constraints",
-		"rooms",
 		"classes",
+		"rooms",
 		"subjects",
 		"teachers",
 	}

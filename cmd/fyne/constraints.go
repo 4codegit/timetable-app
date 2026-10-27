@@ -14,6 +14,13 @@ import (
 	"timetable/internal/domain"
 )
 
+// constraintRow — шаблон строки списка ограничений.
+type constraintRow struct {
+	*fyne.Container
+	label  *widget.Label
+	button *widget.Button
+}
+
 func buildConstraintsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	if activeSchoolID == 0 {
 		return emptySchoolView("Ограничения")
@@ -86,7 +93,12 @@ func buildConstraintsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 	list = widget.NewList(
 		func() int { cs, _ := store.ListConstraints(activeSchoolID); return len(cs) },
 		func() fyne.CanvasObject {
-			return container.NewBorder(nil, nil, widget.NewLabel(""), nil, widget.NewButton("Удалить", nil))
+			lbl := widget.NewLabel("")
+			btn := widget.NewButton("Удалить", nil)
+			return &constraintRow{
+				Container: container.NewBorder(nil, nil, lbl, nil, btn),
+				label:     lbl, button: btn,
+			}
 		},
 		func(i widget.ListItemID, obj fyne.CanvasObject) {
 			cs, err := store.ListConstraints(activeSchoolID)
@@ -94,9 +106,9 @@ func buildConstraintsView(store *db.Store, w fyne.Window) fyne.CanvasObject {
 				return
 			}
 			c := cs[i]
-			box := obj.(*fyne.Container)
-			label := box.Objects[0].(*widget.Label)
-			button := box.Objects[1].(*widget.Button)
+			row := obj.(*constraintRow)
+			label := row.label
+			button := row.button
 			label.SetText(describeConstraint(store, c))
 			button.OnTapped = func() {
 				dialog.NewConfirm("Удалить ограничение?", label.Text, func(ok bool) {

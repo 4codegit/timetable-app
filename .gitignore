@@ -1,11 +1,22 @@
 # Build output
 /timetable
 /timetable.exe
+/timetable-windows.exe
+/timetable-linux
+/timetable-fyne
 /dist/
 /build/
 
+# AppImage build leftovers
+/AppDir/
+/usr/
+*.rpm
+
 # Database
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Frontend
 frontend/node_modules/

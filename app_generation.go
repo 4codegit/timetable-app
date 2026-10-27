@@ -9,7 +9,9 @@ import (
 	"timetable/internal/solver"
 )
 
-// generationState tracks live progress of an in-progress precise generation.
+// generationState tracks live progress of in-progress precise generations.
+// Terminal entries are reaped lazily so the map cannot grow unbounded while
+// still giving the frontend a grace window to read the final status.
 type generationState struct {
 	mu     sync.RWMutex
 	states map[int64]*GenProgress
@@ -22,27 +24,54 @@ type GenProgress struct {
 	Total  int    `json:"total"`
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
+
+	schoolID int       `json:"-"`
+	doneAt   time.Time `json:"-"`
 }
+
+// reapDelay — сколько терминальная запись живёт после done/error, прежде чем
+// её можно удалить (фронтенд поллит каждые 500 мс и должен успеть прочитать).
+const reapDelay = 30 * time.Second
 
 var genState = &generationState{
 	states: make(map[int64]*GenProgress),
 }
 
-func (g *generationState) newID() int64 {
+// begin резервирует запись "running" для школы. Если генерация этой школы уже
+// идёт — возвращает её ID и false (защита от параллельных запусков: второй
+// вызов просто цепляется к прогрессу первого).
+func (g *generationState) begin(schoolID int) (int64, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.reapLocked()
+	for _, s := range g.states {
+		if s.schoolID == schoolID && s.Status == "running" {
+			return s.ID, false
+		}
+	}
 	g.nextID++
-	return g.nextID
+	id := g.nextID
+	g.states[id] = &GenProgress{ID: id, schoolID: schoolID, Status: "running"}
+	return id, true
 }
 
+// set обновляет запись, создавая её при необходимости (раньше был update-only,
+// из-за чего прогресс никогда не записывался и поллинг всегда получал
+// "generation not found").
 func (g *generationState) set(id int64, placed, total int, status string, err string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if s, ok := g.states[id]; ok {
-		s.Placed = placed
-		s.Total = total
-		s.Status = status
-		s.Error = err
+	s, ok := g.states[id]
+	if !ok {
+		s = &GenProgress{ID: id, Status: status}
+		g.states[id] = s
+	}
+	s.Placed = placed
+	s.Total = total
+	s.Status = status
+	s.Error = err
+	if status == "done" || status == "error" {
+		s.doneAt = time.Now()
 	}
 }
 
@@ -62,14 +91,28 @@ func (g *generationState) delete(id int64) {
 	delete(g.states, id)
 }
 
+// reapLocked удаляет терминальные записи старше reapDelay. Вызывается под g.mu.
+func (g *generationState) reapLocked() {
+	now := time.Now()
+	for id, s := range g.states {
+		if !s.doneAt.IsZero() && now.Sub(s.doneAt) > reapDelay {
+			delete(g.states, id)
+		}
+	}
+}
+
 // StartPreciseGeneration launches OR-Tools CP-SAT (or pure-Go fallback) in a
 // background goroutine and returns a generation ID immediately. The frontend
 // polls GetGenerationProgress to show a live progress bar.
 // solveTimeoutSec == 0 means no time limit — solver runs until finished.
 func (a *App) StartPreciseGeneration(schoolID, days, slots, daysMask, solveTimeoutSec int) int64 {
+	id, isNew := genState.begin(schoolID)
+	if !isNew {
+		return id // уже идёт генерация этой школы — цепляемся к её прогрессу
+	}
+
 	in, err := a.loadSolveInput(schoolID, days, slots, daysMask)
 	if err != nil {
-		id := genState.newID()
 		genState.set(id, 0, 0, "error", err.Error())
 		return id
 	}
@@ -85,7 +128,6 @@ func (a *App) StartPreciseGeneration(schoolID, days, slots, daysMask, solveTimeo
 		timeout = 30 * time.Second
 	}
 
-	id := genState.newID()
 	total := 0
 	for _, l := range in.Lessons {
 		if h := l.HoursPerWeek; h > 0 {
@@ -141,17 +183,33 @@ func (a *App) HasPreciseSolver() bool {
 }
 
 // loadSolveInput собирает SolveInput из хранилища (общее для Generate и
-// StartPreciseGeneration).
+// StartPreciseGeneration). Ошибка любого списка — ошибка всей загрузки:
+// запускать солвер на неполных данных нельзя.
 func (a *App) loadSolveInput(schoolID, days, slots, daysMask int) (solver.SolveInput, error) {
 	lessons, err := a.store.ListLessons(schoolID)
 	if err != nil {
 		return solver.SolveInput{}, err
 	}
-	ts, _ := a.store.ListTeachers(schoolID)
-	cs, _ := a.store.ListClasses(schoolID)
-	rs, _ := a.store.ListRooms(schoolID)
-	subs, _ := a.store.ListSubjects(schoolID)
-	cons, _ := a.store.ListConstraints(schoolID)
+	ts, err := a.store.ListTeachers(schoolID)
+	if err != nil {
+		return solver.SolveInput{}, err
+	}
+	cs, err := a.store.ListClasses(schoolID)
+	if err != nil {
+		return solver.SolveInput{}, err
+	}
+	rs, err := a.store.ListRooms(schoolID)
+	if err != nil {
+		return solver.SolveInput{}, err
+	}
+	subs, err := a.store.ListSubjects(schoolID)
+	if err != nil {
+		return solver.SolveInput{}, err
+	}
+	cons, err := a.store.ListConstraints(schoolID)
+	if err != nil {
+		return solver.SolveInput{}, err
+	}
 	return solver.SolveInput{
 		SchoolID:    schoolID,
 		Lessons:     lessons,

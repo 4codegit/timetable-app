@@ -398,3 +398,77 @@ func TestSolveNoRoomsPlacesNothing(t *testing.T) {
 		t.Fatalf("placed = %d, want 0 (кабинетов нет)", res.Placed)
 	}
 }
+
+// TestFallbackRespectsRoomUnavailable — регрессия: эвристический солвер
+// проверял только занятость кабинета, но не жёсткое room_unavailable
+// (HardSet вызывался с roomID=0). CP-SAT при этом запрет соблюдал — итог
+// зависел от сборки. Урок обязан попасть в разрешённую комнату.
+func TestFallbackRespectsRoomUnavailable(t *testing.T) {
+	teachers := map[int]domain.Teacher{1: {ID: 1, Name: "Иванов"}}
+	classes := map[int]domain.SchoolClass{1: {ID: 1, Name: "10А"}}
+	subjects := map[int]domain.Subject{1: {ID: 1, Name: "Физика"}}
+	rooms := []domain.Room{
+		{ID: 1, Name: "Запрещённая", RoomType: "any"},
+		{ID: 2, Name: "Разрешённая", RoomType: "any"},
+	}
+	lessons := []domain.Lesson{
+		{ID: 1, ClassID: 1, SubjectID: 1, TeacherID: 1, HoursPerWeek: 2},
+	}
+	cons := []domain.Constraint{
+		// Кабинет 1 недоступен всю неделю (без DayOfWeek/TimeslotStart).
+		{ID: 1, SchoolID: 1, Type: "room_unavailable", EntityType: "room", EntityID: 1, Weight: 100, IsHard: true},
+	}
+	in := SolveInput{
+		SchoolID: 1, Lessons: lessons, Teachers: teachers, Classes: classes,
+		Rooms: rooms, Subjects: subjects, Constraints: cons,
+		Config: domain.SchedulingConfig{DaysPerWeek: 5, SlotsPerDay: 6},
+	}
+	res := Solve(context.Background(), in, 2, 10*time.Second, nil)
+	for _, e := range res.Entries {
+		if e.RoomID == 1 {
+			t.Fatalf("lesson placed in a room forbidden by room_unavailable: %+v", e)
+		}
+	}
+	if res.Placed != res.Total {
+		t.Logf("placement incomplete (allowed, but no forbidden rooms): %d/%d", res.Placed, res.Total)
+	}
+}
+
+// TestNoSameClassSameSubjectDoubleBooking — регрессия: classFreeFlat считал
+// клетку с ТЕМ ЖЕ предметом свободной для ЛЮБОГО урока. Два разных урока
+// одного класса с одинаковым предметом, но разными учителями вставали в
+// один слот — двойное бронирование класса. Теперь пересечение по предмету
+// разрешено только половинкам делёных уроков.
+func TestNoSameClassSameSubjectDoubleBooking(t *testing.T) {
+	teachers := map[int]domain.Teacher{
+		1: {ID: 1, Name: "Иванов"},
+		2: {ID: 2, Name: "Петров"},
+	}
+	classes := map[int]domain.SchoolClass{1: {ID: 1, Name: "10А"}}
+	subjects := map[int]domain.Subject{1: {ID: 1, Name: "Английский"}}
+	rooms := []domain.Room{{ID: 1, Name: "201", RoomType: "any"}}
+	lessons := []domain.Lesson{
+		{ID: 1, ClassID: 1, SubjectID: 1, TeacherID: 1, HoursPerWeek: 2},
+		{ID: 2, ClassID: 1, SubjectID: 1, TeacherID: 2, HoursPerWeek: 2},
+	}
+	in := SolveInput{
+		SchoolID: 1, Lessons: lessons, Teachers: teachers, Classes: classes,
+		Rooms: rooms, Subjects: subjects,
+		Config: domain.SchedulingConfig{DaysPerWeek: 5, SlotsPerDay: 6},
+	}
+	res := Solve(context.Background(), in, 2, 10*time.Second, nil)
+	seen := map[int]bool{}
+	for _, e := range res.Entries {
+		if e.ClassID != 1 {
+			continue
+		}
+		key := e.DayOfWeek*1000 + e.Timeslot
+		if seen[key] {
+			t.Fatalf("class 1 double-booked at day=%d slot=%d", e.DayOfWeek, e.Timeslot)
+		}
+		seen[key] = true
+	}
+	if res.Placed != res.Total {
+		t.Fatalf("solvable instance left incomplete: %d/%d", res.Placed, res.Total)
+	}
+}

@@ -127,6 +127,14 @@ func ortoolsSolve(in SolveInput, parallelism int, timeout time.Duration) (Result
 		workers = runtime.NumCPU()
 	}
 
+	// timeout == 0 («без лимита») нельзя передавать как 0 мс: CP-SAT с
+	// set_max_time_in_seconds(0.0) отвечает мгновенно пустым решением.
+	// Переводим в сентинел 24 часа.
+	tlimMs := timeout.Milliseconds()
+	if timeout <= 0 {
+		tlimMs = 24 * 60 * 60 * 1000
+	}
+
 	// CGO needs a valid pointer even when the count passed to C is 0.
 	if ctCount == 0 {
 		cts = []C.CConstraint{{}}
@@ -147,7 +155,7 @@ func ortoolsSolve(in SolveInput, parallelism int, timeout time.Duration) (Result
 		C.int(nr), &roomIDs[0], &roomTypes[0],
 		C.int(days), C.int(slots),
 		C.int(ctCount), &cts[0],
-		C.int(int(timeout.Milliseconds())), C.int(workers),
+		C.int(int(tlimMs)), C.int(workers),
 		&outLesson[0], &outClass[0], &outTeacher[0], &outSubject[0],
 		&outRoom[0], &outDay[0], &outSlot[0],
 		C.int(occCount), &outCount,
@@ -167,7 +175,6 @@ func ortoolsSolve(in SolveInput, parallelism int, timeout time.Duration) (Result
 		if int(outDay[i]) < 0 {
 			continue // урок не удалось разместить (перегруженная школа)
 		}
-		placed++
 		// bind.cpp reports the lesson *index* into in.Lessons, not the DB
 		// lesson ID — map it back here. A real ID is required for the
 		// schedule_entries foreign key.
@@ -190,6 +197,9 @@ func ortoolsSolve(in SolveInput, parallelism int, timeout time.Duration) (Result
 			DayOfWeek: int(outDay[i]),
 			Timeslot:  int(outSlot[i]),
 		})
+		placed++ // считаем только реально попавшие в entries записи
 	}
-	return Result{Entries: entries, Placed: placed, Total: n, Violations: 0}, true
+	// Total — все вхождения модели (occCount), а не outCount: CP-SAT пишет
+	// outCount строк, включая не размещённые (day = -1).
+	return Result{Entries: entries, Placed: placed, Total: occCount, Violations: 0}, true
 }
