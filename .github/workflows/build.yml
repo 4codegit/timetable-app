@@ -247,7 +247,11 @@ jobs:
           if [ -f third_party/ortools_win/bin/ortools.dll ]; then
             cp third_party/ortools_win/bin/ortools.dll fyne-dist/
           fi
-          powershell Compress-Archive -Path fyne-dist/* -DestinationPath timetable-fyne-windows-x64.zip
+          # Glob в одинарных кавычках: bash не должен разворачивать его в
+          # список аргументов, иначе второй файл биндится на -DestinationPath
+          # и Compress-Archive падает ("specified more than once"). PowerShell
+          # сам разворачивает wildcard внутри -Path.
+          powershell Compress-Archive -Path 'fyne-dist/*' -DestinationPath timetable-fyne-windows-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
           name: timetable-fyne-windows
@@ -266,6 +270,18 @@ jobs:
         run: ls -R artifacts
       - uses: softprops/action-gh-release@v2
         with:
+          # Полное описание релиза: windows-release.yml мог создать релиз раньше
+          # с текстом-заглушкой — здесь перезаписываем его нормальным.
+          body: |
+            Сборки **Timetable ${{ github.ref_name }}** (OR-Tools CP-SAT):
+
+            - `timetable-setup-x64.exe` — Windows-установщик (WebView2-режим);
+            - `timetable-win64.zip` — Windows, браузерный режим, portable;
+            - `timetable-x86_64.AppImage` — Linux (нужен webkit2gtk-4.1 из системы);
+            - `timetable-fyne-linux-x64.tar.gz` — Linux, нативный Fyne-клиент;
+            - `timetable-fyne-windows-x64.zip` — Windows, нативный Fyne-клиент.
+
+            DLL/libortools лежат рядом с бинарником — распаковывать целиком.
           files: |
             artifacts/timetable-windows-setup/*
             artifacts/timetable-linux/*

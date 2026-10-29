@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	appVersion = "1.11.5"
+	appVersion = "1.11.6"
 	appName    = "Timetable"
 )
 
